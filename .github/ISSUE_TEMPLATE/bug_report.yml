@@ -1,0 +1,28 @@
+name: Bug report
+description: Report a reproducible problem in OpenCodeAgent.
+title: "bug: "
+labels: [bug]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Include the expected and actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How can we reproduce it?
+      placeholder: List the smallest reliable steps.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: OpenCodeAgent version
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: OS, Python version, and installation method.
