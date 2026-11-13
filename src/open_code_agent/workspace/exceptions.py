@@ -49,3 +49,23 @@ class SearchError(WorkspaceError):
 
 class SearchTimeoutError(SearchError):
     """Raised when ripgrep exceeds the workspace search timeout."""
+
+
+class PatchError(WorkspaceError):
+    """Base exception for safe patch proposal validation and application."""
+
+
+class InvalidPatchError(PatchError):
+    """Raised for malformed, over-limit, or unsupported unified diffs."""
+
+
+class ProposalNotFoundError(PatchError):
+    """Raised for an unknown proposal identifier."""
+
+
+class ProposalApprovalError(PatchError):
+    """Raised when an unapproved or already applied proposal is applied."""
+
+
+class StaleProposalError(PatchError):
+    """Raised when a target changed after proposal validation or preview."""

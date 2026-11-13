@@ -21,6 +21,10 @@ class WorkspacePolicy(ProtocolModel):
     max_list_results: int = Field(default=1_000, gt=0)
     max_search_results: int = Field(default=200, gt=0)
     max_output_bytes: int = Field(default=262_144, gt=0)
+    max_patch_bytes: int = Field(default=131_072, gt=0)
+    max_patch_files: int = Field(default=10, gt=0)
+    max_patch_hunks: int = Field(default=100, gt=0)
+    max_patch_lines: int = Field(default=5_000, gt=0)
     search_timeout_seconds: float = Field(default=5.0, gt=0)
     include_hidden_files: bool = False
     respect_gitignore: bool = True

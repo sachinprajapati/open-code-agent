@@ -15,6 +15,7 @@ from open_code_agent.tools.exceptions import (
 )
 from open_code_agent.tools.list_files import ListFilesTool
 from open_code_agent.tools.mock import AddNumbersTool, EchoTool, ScriptedTool
+from open_code_agent.tools.propose_patch import ProposePatchTool
 from open_code_agent.tools.read_file import ReadFileTool
 from open_code_agent.tools.registry import ToolRegistry, validate_tool_arguments
 from open_code_agent.tools.search_code import SearchCodeTool
@@ -27,6 +28,7 @@ __all__ = [
     "InvalidToolError",
     "ListFilesTool",
     "ReadFileTool",
+    "ProposePatchTool",
     "SearchCodeTool",
     "ScriptedTool",
     "ToolArgumentValidationError",
