@@ -18,6 +18,7 @@ from open_code_agent.tools.mock import AddNumbersTool, EchoTool, ScriptedTool
 from open_code_agent.tools.propose_patch import ProposePatchTool
 from open_code_agent.tools.read_file import ReadFileTool
 from open_code_agent.tools.registry import ToolRegistry, validate_tool_arguments
+from open_code_agent.tools.run_command import RunCommandTool
 from open_code_agent.tools.search_code import SearchCodeTool
 
 __all__ = [
@@ -29,6 +30,7 @@ __all__ = [
     "ListFilesTool",
     "ReadFileTool",
     "ProposePatchTool",
+    "RunCommandTool",
     "SearchCodeTool",
     "ScriptedTool",
     "ToolArgumentValidationError",

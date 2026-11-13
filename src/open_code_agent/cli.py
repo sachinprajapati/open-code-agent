@@ -1,15 +1,26 @@
 """Command-line interface for OpenCodeAgent."""
 
+import asyncio
 import platform
 import shutil
+import sys
 from pathlib import Path
 from typing import Annotated
 
 import typer
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
 
 from open_code_agent import __version__
+from open_code_agent.execution import (
+    ApprovalDecision,
+    CommandApprovalRequest,
+    CommandClassifier,
+    CommandExecutionPolicy,
+    CommandProposal,
+    ProcessRunner,
+)
 from open_code_agent.workspace import (
     PatchProposal,
     PatchProposalStore,
@@ -92,6 +103,59 @@ def patch_apply(
     raise typer.Exit(code=1)
 
 
+@app.command("command-run")
+def command_run(
+    workspace: Annotated[Path, typer.Option("--workspace")],
+    executable: Annotated[str, typer.Option("--executable")],
+    reason: Annotated[str, typer.Option("--reason")],
+    arguments: Annotated[list[str] | None, typer.Option("--argument")] = None,
+    working_directory: Annotated[str, typer.Option("--working-directory")] = ".",
+    timeout_seconds: Annotated[float, typer.Option("--timeout-seconds")] = 120.0,
+) -> None:
+    """Run one explicitly approved, structured development command.
+
+    This command intentionally enables only the conservative default policy;
+    shell, network, package, Git mutation, and formatter-write commands remain
+    blocked even when a user tries to approve them.
+    """
+    context = _workspace_from_cli_input(workspace)
+    command_arguments = arguments or []
+    try:
+        proposal = CommandProposal.create(
+            executable=executable,
+            arguments=command_arguments,
+            working_directory=working_directory,
+            timeout_seconds=timeout_seconds,
+            reason=reason,
+        )
+        policy = CommandExecutionPolicy(execution_enabled=True)
+        classification = CommandClassifier().classify(proposal)
+        policy.validate(proposal, classification)
+    except Exception as error:
+        raise typer.BadParameter(str(error)) from error
+    request = CommandApprovalRequest(proposal, classification, proposal.fingerprint)
+    decision = _cli_approval(request)
+    if decision is not ApprovalDecision.APPROVED_ONCE:
+        console.print("Command was not executed.")
+        raise typer.Exit(code=1)
+    if request.fingerprint != proposal.fingerprint:
+        console.print("Command proposal changed after approval.")
+        raise typer.Exit(code=1)
+    try:
+        result = asyncio.run(
+            ProcessRunner(context, policy).run(proposal, classification)
+        )
+    except KeyboardInterrupt:
+        console.print("Command run cancelled.")
+        raise typer.Exit(code=1) from None
+    console.print(Panel.fit(result.stdout or "(no stdout)", title="stdout"))
+    if result.stderr:
+        console.print(Panel.fit(result.stderr, title="stderr"))
+    console.print(f"Exit code: {result.exit_code}; timed out: {result.timed_out}")
+    if result.timed_out or result.exit_code not in {0, None}:
+        raise typer.Exit(code=1)
+
+
 def _proposal_from_cli_inputs(workspace: Path, diff_file: Path) -> PatchProposal:
     """Construct a short-lived proposal store for CLI preview-only requests."""
     store = PatchProposalStore(_workspace_from_cli_input(workspace))
@@ -131,3 +195,37 @@ def _display_proposal(proposal: PatchProposal) -> None:
     for path in proposal.affected_paths:
         console.print(f"- {path}")
     console.print(proposal.diff, markup=False)
+
+
+def _cli_approval(request: CommandApprovalRequest) -> ApprovalDecision:
+    """Render a human review panel; non-interactive invocation denies by default."""
+    proposal = request.proposal
+    classification = request.classification
+    console.print(
+        Panel.fit(
+            "\n".join(
+                [
+                    f"Command: {proposal.display_argv}",
+                    f"Working directory: {proposal.working_directory.as_posix()}",
+                    f"Reason: {proposal.reason}",
+                    f"Classification: {classification.category.value}",
+                    f"Risk: {classification.risk.value}",
+                    f"Timeout: {proposal.timeout_seconds:g}s",
+                    f"May modify files: {classification.may_modify_files}",
+                    f"May use network: {classification.may_use_network}",
+                    f"Fingerprint: {request.fingerprint}",
+                ]
+            ),
+            title="Approve command once?",
+        )
+    )
+    if not sys.stdin.isatty():
+        return ApprovalDecision.DENIED
+    try:
+        choice = typer.prompt("[a]pprove once, [d]eny (default), [c]ancel", default="d")
+    except (KeyboardInterrupt, EOFError):
+        return ApprovalDecision.CANCELLED
+    return {
+        "a": ApprovalDecision.APPROVED_ONCE,
+        "c": ApprovalDecision.CANCELLED,
+    }.get(choice.strip().lower(), ApprovalDecision.DENIED)

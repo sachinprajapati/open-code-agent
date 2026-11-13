@@ -17,16 +17,18 @@ Completed:
 - explicit tool runtime and deterministic in-memory development tools
 - safe read-only workspace boundary
 - `list_files`, `read_file`, and `search_code` workspace tools
+- approval-gated patch application for existing workspace files
+- approval-gated structured command execution for development checks
 
 The protocol and provider layers provide a stable boundary for future OpenAI,
 Anthropic, Gemini, Ollama, and compatible provider adapters.
 
-Not yet implemented: interactive provider configuration CLI/UI, file
-creation/editing, patch application, terminal execution, Git mutation, approval
-policies, conversation persistence, interactive CLI chat, the VS Code
+Not yet implemented: interactive provider configuration CLI/UI, unrestricted
+shell or terminal access, automatic command approval, container sandboxing, Git
+mutation, conversation persistence, interactive CLI chat, the VS Code
 extension, MCP, native Anthropic/Gemini adapters, and secure desktop keyring or
-VS Code SecretStorage integration. Workspace inspection is deliberately
-read-only and policy-bound; see [workspace tools](docs/workspace-tools.md).
+VS Code SecretStorage integration. Workspace inspection remains policy-bound;
+see [workspace tools](docs/workspace-tools.md) and [command execution](docs/command-execution.md).
 
 ## Architecture direction
 
