@@ -19,13 +19,14 @@ Completed:
 - `list_files`, `read_file`, and `search_code` workspace tools
 - approval-gated patch application for existing workspace files
 - approval-gated structured command execution for development checks
+- persistent, secret-reference-only OpenAI-compatible provider profiles
+- one-shot and interactive CLI coding-agent workflows
 
 The protocol and provider layers provide a stable boundary for future OpenAI,
 Anthropic, Gemini, Ollama, and compatible provider adapters.
 
-Not yet implemented: interactive provider configuration CLI/UI, unrestricted
-shell or terminal access, automatic command approval, container sandboxing, Git
-mutation, conversation persistence, interactive CLI chat, the VS Code
+Not yet implemented: unrestricted shell or terminal access, automatic command
+approval, container sandboxing, Git mutation, conversation persistence, the VS Code
 extension, MCP, native Anthropic/Gemini adapters, and secure desktop keyring or
 VS Code SecretStorage integration. Workspace inspection remains policy-bound;
 see [workspace tools](docs/workspace-tools.md) and [command execution](docs/command-execution.md).
@@ -58,9 +59,27 @@ uv sync --all-groups
 uv run open-code-agent --version
 uv run open-code-agent doctor
 uv run python -m open_code_agent --version
+uv run open-code-agent provider add --profile-id local --display-name Local --base-url http://localhost:1234/v1 --default-model model --api-key-secret-ref env:OCA_API_KEY
+uv run open-code-agent provider set-default local
+uv run open-code-agent ask "Explain the agent loop" --mode plan
+uv run open-code-agent chat
 ```
 
 `doctor` is read-only: it only reports local environment details and tool availability.
+
+Provider profiles are stored as versioned JSON in `<data_dir>/profiles.json`.
+They contain non-secret endpoint configuration and `env:VARIABLE` references,
+never resolved values. A profile ID identifies a saved configuration; its
+provider ID is `openai-compatible.<profile_id>`; a model ID identifies a model
+at that provider. Writes are atomic and protected from concurrent callers in
+one process, but two processes should not modify the same store concurrently.
+
+`ask` and `chat` default `--workspace` to the current directory at the CLI
+boundary only. `plan` exposes read tools; `ask` exposes approval-gated patch
+and command proposals; `auto-edit` currently keeps patch approval enabled and
+always requires approval for commands. Non-interactive approval requests fail
+closed. CLI exit statuses are stable: 0 success, 2 configuration, 3 provider,
+4 limit, 5 cancellation, and 10 internal failure.
 
 ## Configuration
 
