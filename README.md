@@ -13,15 +13,20 @@ Completed:
 - OpenAI-compatible Chat Completions transport
 - environment-based secret resolution
 - streaming text and tool-call normalization
+- bounded provider-independent agent loop
+- explicit tool runtime and deterministic in-memory development tools
+- safe read-only workspace boundary
+- `list_files`, `read_file`, and `search_code` workspace tools
 
 The protocol and provider layers provide a stable boundary for future OpenAI,
 Anthropic, Gemini, Ollama, and compatible provider adapters.
 
-Not yet implemented: interactive provider configuration CLI/UI, the agent loop,
-repository/file tools, file editing, terminal execution, the VS Code extension,
-native Anthropic/Gemini adapters, secure desktop keyring or VS Code
-SecretStorage integration, and MCP. No commands or file edits can be executed
-yet; this remains infrastructure, not a functional coding agent.
+Not yet implemented: interactive provider configuration CLI/UI, file
+creation/editing, patch application, terminal execution, Git mutation, approval
+policies, conversation persistence, interactive CLI chat, the VS Code
+extension, MCP, native Anthropic/Gemini adapters, and secure desktop keyring or
+VS Code SecretStorage integration. Workspace inspection is deliberately
+read-only and policy-bound; see [workspace tools](docs/workspace-tools.md).
 
 ## Architecture direction
 

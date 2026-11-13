@@ -38,6 +38,7 @@ class MockModelProvider:
         provider_id: str = "mock",
         display_name: str = "Mock provider",
         events: Sequence[ModelStreamEvent] = (),
+        event_sequences: Sequence[Sequence[ModelStreamEvent]] | None = None,
         models: Sequence[ModelInfo] = (),
         validation_result: ConfigurationValidationResult | None = None,
         event_delay_seconds: float = 0.0,
@@ -54,6 +55,14 @@ class MockModelProvider:
         self._provider_id = provider_id
         self._display_name = display_name
         self._events = tuple(event.model_copy(deep=True) for event in events)
+        self._event_sequences = (
+            tuple(
+                tuple(event.model_copy(deep=True) for event in sequence)
+                for sequence in event_sequences
+            )
+            if event_sequences is not None
+            else None
+        )
         self._models = tuple(model.model_copy(deep=True) for model in models)
         self._validation_result = (
             validation_result or ConfigurationValidationResult(valid=True)
@@ -91,8 +100,18 @@ class MockModelProvider:
 
     async def _stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
         self._received_requests.append(request.model_copy(deep=True))
+        invocation_index = self._invocation_count
         self._invocation_count += 1
-        for event in self._events:
+        if self._event_sequences is None:
+            events = self._events
+        else:
+            try:
+                events = self._event_sequences[invocation_index]
+            except IndexError as error:
+                raise RuntimeError(
+                    "Mock provider has no scripted stream for this call."
+                ) from error
+        for event in events:
             if self._event_delay_seconds:
                 await asyncio.sleep(self._event_delay_seconds)
             elif self._yield_control:
