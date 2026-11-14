@@ -115,6 +115,49 @@ def doctor() -> None:
     console.print(table)
 
 
+@app.command("app-server")
+def app_server(
+    profile_store: Annotated[Path | None, typer.Option("--profile-store")] = None,
+    log_level: Annotated[str, typer.Option("--log-level")] = "INFO",
+    debug: Annotated[bool, typer.Option("--debug")] = False,
+    max_sessions: Annotated[int, typer.Option("--max-sessions", min=1)] = 16,
+    approval_timeout: Annotated[
+        float, typer.Option("--approval-timeout", min=0.1)
+    ] = 120.0,
+) -> None:
+    """Run the editor-facing JSON-RPC server over stdin/stdout only."""
+    del log_level, debug  # Diagnostics intentionally remain quiet unless added safely.
+    from open_code_agent.app_server import AppServer, AppServerLimits
+    from open_code_agent.app_server.transport import StdioLineTransport
+
+    store_path = profile_store or (Settings().data_dir / "profiles.json")
+    limits = AppServerLimits(
+        max_sessions=max_sessions, approval_timeout_seconds=approval_timeout
+    )
+    server = AppServer(
+        StdioLineTransport(limits),
+        profile_store=ProviderProfileStore(store_path),
+        limits=limits,
+    )
+    try:
+        asyncio.run(server.serve())
+    except KeyboardInterrupt:
+        # stdout must remain exclusively reserved for JSON-RPC messages.
+        raise typer.Exit(ExitCode.SUCCESS) from None
+
+
+@app.command("app-server-manifest")
+def app_server_manifest(
+    output: Annotated[Path, typer.Option("--output")] = Path(
+        "docs/app-server.protocol.json"
+    ),
+) -> None:
+    """Regenerate the deterministic app-server protocol manifest."""
+    from open_code_agent.app_server.manifest import write_manifest
+
+    write_manifest(output)
+
+
 @app.command("patch-preview")
 def patch_preview(
     workspace: Annotated[Path, typer.Option("--workspace")],

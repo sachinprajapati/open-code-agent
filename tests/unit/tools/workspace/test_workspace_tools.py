@@ -126,7 +126,7 @@ async def test_search_is_bounded_safe_and_excludes_secrets(
     assert not literal.is_error
     literal_content = object_content(literal.content)
     assert literal_content["truncated"] is True
-    assert object_list(literal_content["matches"])[0]["path"] == "src/main.py"
+    assert object_list(literal_content["matches"])[0]["path"] == "README.md"
 
     insensitive = await tool.execute({"query": "hello"}, context())
     assert not insensitive.is_error
@@ -146,3 +146,55 @@ async def test_search_cancellation_propagates(workspace_root: Path) -> None:
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+@pytest.mark.skipif(shutil.which("rg") is None, reason="ripgrep is not installed")
+async def test_search_order_and_truncation_are_deterministic(tmp_path: Path) -> None:
+    """Selection is bytewise-path ordered before the bounded result limit applies."""
+    files = {
+        "zeta.txt": "needle\nneedle\n",
+        "Alpha.txt": "needle\n",
+        "a space.txt": "needle\n",
+        "alpha.txt": "needle\n",
+        "beta.txt": "needle\n",
+    }
+    for name, contents in files.items():
+        (tmp_path / name).write_text(contents)
+    tool = SearchCodeTool(
+        WorkspaceContext(root=tmp_path, policy=WorkspacePolicy(max_search_results=20))
+    )
+
+    results = [await tool.execute({"query": "needle"}, context()) for _ in range(10)]
+    snapshots = [object_content(result.content) for result in results]
+    assert all(not result.is_error for result in results)
+    assert all(snapshot == snapshots[0] for snapshot in snapshots)
+    assert [
+        (match["path"], match["line"], match["column"])
+        for match in object_list(snapshots[0]["matches"])
+    ] == [
+        ("Alpha.txt", 1, 1),
+        ("a space.txt", 1, 1),
+        ("alpha.txt", 1, 1),
+        ("beta.txt", 1, 1),
+        ("zeta.txt", 1, 1),
+        ("zeta.txt", 2, 1),
+    ]
+
+    bounded = SearchCodeTool(
+        WorkspaceContext(root=tmp_path, policy=WorkspacePolicy(max_search_results=2))
+    )
+    bounded_results = [
+        await bounded.execute({"query": "needle"}, context()) for _ in range(10)
+    ]
+    bounded_snapshots = [object_content(result.content) for result in bounded_results]
+    assert all(snapshot == bounded_snapshots[0] for snapshot in bounded_snapshots)
+    assert bounded_snapshots[0]["truncated"] is True
+    assert [
+        match["path"] for match in object_list(bounded_snapshots[0]["matches"])
+    ] == [
+        "Alpha.txt",
+        "a space.txt",
+    ]
+
+    no_matches = await tool.execute({"query": "absent"}, context())
+    assert no_matches.content == {"matches": [], "truncated": False}

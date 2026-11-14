@@ -21,6 +21,8 @@ Completed:
 - approval-gated structured command execution for development checks
 - persistent, secret-reference-only OpenAI-compatible provider profiles
 - one-shot and interactive CLI coding-agent workflows
+- Python stdio JSON-RPC application server with streamed events, cancellable
+  in-memory sessions, and bidirectional one-time approvals
 
 The protocol and provider layers provide a stable boundary for future OpenAI,
 Anthropic, Gemini, Ollama, and compatible provider adapters.
@@ -63,6 +65,7 @@ uv run open-code-agent provider add --profile-id local --display-name Local --ba
 uv run open-code-agent provider set-default local
 uv run open-code-agent ask "Explain the agent loop" --mode plan
 uv run open-code-agent chat
+uv run open-code-agent app-server
 ```
 
 `doctor` is read-only: it only reports local environment details and tool availability.

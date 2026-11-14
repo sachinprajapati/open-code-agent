@@ -1,0 +1,86 @@
+{
+  "capabilities": [
+    "profiles",
+    "sessions",
+    "streaming_events",
+    "bidirectional_approvals",
+    "cancellation"
+  ],
+  "methods": [
+    {
+      "direction": "client_to_server",
+      "name": "initialize"
+    },
+    {
+      "direction": "client_to_server",
+      "name": "models/list"
+    },
+    {
+      "direction": "client_to_server",
+      "name": "profiles/get"
+    },
+    {
+      "direction": "client_to_server",
+      "name": "profiles/list"
+    },
+    {
+      "direction": "client_to_server",
+      "name": "profiles/test"
+    },
+    {
+      "direction": "client_to_server",
+      "name": "session/clear"
+    },
+    {
+      "direction": "client_to_server",
+      "name": "session/close"
+    },
+    {
+      "direction": "client_to_server",
+      "name": "session/create"
+    },
+    {
+      "direction": "client_to_server",
+      "name": "session/list"
+    },
+    {
+      "direction": "client_to_server",
+      "name": "session/status"
+    },
+    {
+      "direction": "client_to_server",
+      "name": "shutdown"
+    },
+    {
+      "direction": "client_to_server",
+      "name": "turn/cancel"
+    },
+    {
+      "direction": "client_to_server",
+      "name": "turn/start"
+    },
+    {
+      "direction": "server_to_client",
+      "name": "approval/request"
+    }
+  ],
+  "notifications": [
+    {
+      "direction": "client_to_server",
+      "name": "initialized"
+    },
+    {
+      "direction": "client_to_server",
+      "name": "exit"
+    },
+    {
+      "direction": "server_to_client",
+      "name": "agent/event"
+    }
+  ],
+  "protocol_version": "1.0",
+  "transport": {
+    "framing": "utf-8-json-lines",
+    "kind": "stdio"
+  }
+}

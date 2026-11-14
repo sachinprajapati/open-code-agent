@@ -159,7 +159,15 @@ class SearchCodeTool:
         glob: str | None,
     ) -> list[str]:
         policy = self._workspace.policy
-        args = [executable, "--json", "--no-messages", "--line-number", "--column"]
+        args = [
+            executable,
+            "--json",
+            "--no-messages",
+            "--line-number",
+            "--column",
+            "--sort",
+            "path",
+        ]
         args.append("--case-sensitive" if case_sensitive else "--ignore-case")
         if not is_regex:
             args.append("--fixed-strings")
@@ -232,8 +240,10 @@ class SearchCodeTool:
             raise SearchError("ripgrep produced an oversized result line.") from error
         records.sort(
             key=lambda item: (
-                str(item["path"]),
+                str(item["path"]).encode("utf-8"),
                 item["line"] if isinstance(item["line"], int) else 0,
+                item["column"] if isinstance(item["column"], int) else 0,
+                str(item["text"]),
             )
         )
         return records, truncated
