@@ -37,6 +37,12 @@ export class JsonRpcClient extends EventEmitter {
     if (this.closed) return; this.closed = true;
     for (const [id, pending] of this.pending) { clearTimeout(pending.timer); pending.reject(new ProtocolError(reason)); this.pending.delete(id); }
   }
+  dispose(): void {
+    this.disconnect();
+    this.requestHandlers.clear();
+    this.buffer.length = 0;
+    this.removeAllListeners();
+  }
   private async receive(raw: string): Promise<void> {
     let decoded: unknown; try { decoded = JSON.parse(raw); } catch { this.onLog("Ignored malformed JSON-RPC line from server."); return; }
     if (!this.validEnvelope(decoded)) { this.onLog("Ignored invalid JSON-RPC envelope from server."); return; }

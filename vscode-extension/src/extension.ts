@@ -16,7 +16,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(logger, sessions, view, vscode.window.registerWebviewViewProvider("openCodeAgent.chatView", view, { webviewOptions: { retainContextWhenHidden: true } })); registerCommands(context, view, sessions, runtime, logger);
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100); status.command = "openCodeAgent.openChat"; status.text = "$(hubot) OpenCodeAgent: starting"; context.subscriptions.push(status); status.show();
   runtime.on("state", (state: string) => { status.text = `$(hubot) OpenCodeAgent: ${state}`; });
+  let shutdownPromise: Promise<void> | undefined;
+  const cleanup = () => {
+    if (!shutdownPromise) shutdownPromise = (async () => { approvals.failClosed(); await sessions.disposeAsync(); await runtime.dispose(); })();
+    return shutdownPromise;
+  };
+  shutdown = cleanup;
+  // VS Code disposes subscriptions on reload/window close; deactivate awaits the
+  // same idempotent cleanup when the host gives us that opportunity.
+  context.subscriptions.push({ dispose: () => { void cleanup(); } });
   try { await runtime.start(); await sessions.refreshProfiles(); } catch (error) { view.error(error instanceof Error ? error.message : "OpenCodeAgent runtime could not start."); logger.error("Configure openCodeAgent.server.executable and server.arguments, then restart the runtime."); }
-  shutdown = async () => { approvals.failClosed(); await sessions.disposeAsync(); await runtime.dispose(); };
 }
 export async function deactivate(): Promise<void> { await shutdown?.(); shutdown = undefined; }
