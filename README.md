@@ -23,14 +23,17 @@ Completed:
 - one-shot and interactive CLI coding-agent workflows
 - Python stdio JSON-RPC application server with streamed events, cancellable
   in-memory sessions, and bidirectional one-time approvals
+- functional VS Code sidebar client with runtime supervision, streamed chat,
+  one-time patch/command approvals, cancellation, and session lifecycle
 
 The protocol and provider layers provide a stable boundary for future OpenAI,
 Anthropic, Gemini, Ollama, and compatible provider adapters.
 
 Not yet implemented: unrestricted shell or terminal access, automatic command
-approval, container sandboxing, Git mutation, conversation persistence, the VS Code
-extension, MCP, native Anthropic/Gemini adapters, and secure desktop keyring or
-VS Code SecretStorage integration. Workspace inspection remains policy-bound;
+approval, container sandboxing, Git mutation, conversation persistence,
+provider-management UI, bundled Python runtime, VS Code SecretStorage integration,
+multiple simultaneous sidebar sessions, Marketplace publishing, MCP, native
+Anthropic/Gemini adapters, and secure desktop keyring. Workspace inspection remains policy-bound;
 see [workspace tools](docs/workspace-tools.md) and [command execution](docs/command-execution.md).
 
 ## Architecture direction
@@ -101,6 +104,25 @@ uv run ruff check .
 uv run mypy src tests
 uv run pytest
 ```
+
+## VS Code extension development
+
+The development extension lives in [`vscode-extension`](vscode-extension). It
+uses the checked-in app-server manifest to generate protocol constants and does
+not bundle Python or credentials.
+
+```bash
+cd vscode-extension
+npm ci
+npm run protocol:check
+npm run lint
+npm run typecheck
+npm test
+npm run compile
+```
+
+See [VS Code extension development](docs/vscode-extension.md) for setup,
+settings, workspace behavior, approvals, logging, and troubleshooting.
 
 ## Security warning
 

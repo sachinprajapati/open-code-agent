@@ -1,0 +1,13 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build-open-code-agent-extension",
+      "type": "npm",
+      "script": "compile",
+      "path": "vscode-extension",
+      "problemMatcher": "$tsc",
+      "group": "build"
+    }
+  ]
+}

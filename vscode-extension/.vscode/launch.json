@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run OpenCodeAgent Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "preLaunchTask": "npm: compile",
+      "args": [
+        "${workspaceFolder}/..",
+        "--extensionDevelopmentPath=${workspaceFolder}"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/dist/**/*.js"
+      ]
+    }
+  ]
+}

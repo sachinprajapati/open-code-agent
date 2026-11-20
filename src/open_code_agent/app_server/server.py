@@ -59,7 +59,11 @@ from open_code_agent.app_server.sessions import (
 from open_code_agent.app_server.transport import AsyncLineTransport, TransportError
 from open_code_agent.execution import CommandExecutionPolicy
 from open_code_agent.persistence import ProfileNotFoundError, ProviderProfileStore
-from open_code_agent.providers import OpenAICompatibleProfile, OpenAICompatibleProvider
+from open_code_agent.providers import (
+    ManagedModelProvider,
+    OpenAICompatibleProfile,
+    provider_for_profile,
+)
 from open_code_agent.workspace import (
     InvalidWorkspaceError,
     WorkspaceContext,
@@ -86,7 +90,7 @@ _STATEFUL_METHODS = frozenset(
 )
 
 SessionBuilder = Callable[..., AgentSession]
-ProviderBuilder = Callable[[OpenAICompatibleProfile], OpenAICompatibleProvider]
+ProviderBuilder = Callable[[OpenAICompatibleProfile], ManagedModelProvider]
 
 
 class AppServer:
@@ -99,7 +103,7 @@ class AppServer:
         profile_store: ProviderProfileStore,
         limits: AppServerLimits | None = None,
         session_builder: SessionBuilder = build_agent_session,
-        provider_builder: ProviderBuilder = OpenAICompatibleProvider,
+        provider_builder: ProviderBuilder = provider_for_profile,
     ) -> None:
         self._transport = transport
         self._profile_store = profile_store

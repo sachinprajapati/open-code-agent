@@ -2,6 +2,7 @@
 
 import ipaddress
 import re
+from typing import Literal
 from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import Field, field_validator, model_validator
@@ -43,6 +44,7 @@ class OpenAICompatibleProfile(ProtocolModel):
     project: str | None = None
     extra_headers: dict[str, str] = Field(default_factory=dict)
     metadata: JSONObject | None = None
+    api: Literal["chat_completions", "responses"] = "chat_completions"
 
     @field_validator("profile_id")
     @classmethod

@@ -7,7 +7,7 @@ import shutil
 import sys
 from enum import IntEnum
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 import typer
 from rich.console import Console
@@ -49,7 +49,11 @@ from open_code_agent.persistence import (
     ProviderProfileStore,
 )
 from open_code_agent.protocol import AgentMessage, TextDelta, ToolCallCompleted
-from open_code_agent.providers import OpenAICompatibleProfile, OpenAICompatibleProvider
+from open_code_agent.providers import (
+    ManagedModelProvider,
+    OpenAICompatibleProfile,
+    provider_for_profile,
+)
 from open_code_agent.tools import PatchApprovalRequest
 from open_code_agent.workspace import (
     PatchProposal,
@@ -331,6 +335,7 @@ def _profile_from_options(
     request_timeout: float,
     connect_timeout: float,
     allow_insecure_http: bool,
+    api: Literal["chat_completions", "responses"] = "chat_completions",
 ) -> OpenAICompatibleProfile:
     if api_key_secret_ref is not None and not api_key_secret_ref.startswith("env:"):
         raise typer.BadParameter(
@@ -348,6 +353,7 @@ def _profile_from_options(
             request_timeout_seconds=request_timeout,
             connect_timeout_seconds=connect_timeout,
             allow_insecure_http=allow_insecure_http,
+            api=api,
         )
     except Exception as error:
         raise typer.BadParameter(str(error)) from error
@@ -372,6 +378,10 @@ def provider_add(
     request_timeout: Annotated[float, typer.Option("--request-timeout")] = 60.0,
     connect_timeout: Annotated[float, typer.Option("--connect-timeout")] = 10.0,
     allow_insecure_http: Annotated[bool, typer.Option("--allow-insecure-http")] = False,
+    api: Annotated[
+        Literal["chat_completions", "responses"],
+        typer.Option("--api", help="chat_completions or responses"),
+    ] = "chat_completions",
     replace: Annotated[
         bool, typer.Option("--replace", help="Explicitly replace an existing profile.")
     ] = False,
@@ -386,6 +396,7 @@ def provider_add(
         request_timeout,
         connect_timeout,
         allow_insecure_http,
+        api,
     )
     try:
         store = _profile_store()
@@ -467,9 +478,9 @@ def provider_set_default(profile_id: str) -> None:
     console.print(f"Default profile: {profile_id}")
 
 
-def _provider_for_profile(profile: OpenAICompatibleProfile) -> OpenAICompatibleProvider:
+def _provider_for_profile(profile: OpenAICompatibleProfile) -> ManagedModelProvider:
     """Small seam for network-free CLI tests; caller owns the returned provider."""
-    return OpenAICompatibleProvider(profile)
+    return provider_for_profile(profile)
 
 
 async def _provider_test(profile: OpenAICompatibleProfile) -> tuple[bool, str]:

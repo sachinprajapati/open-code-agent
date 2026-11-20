@@ -1,0 +1,69 @@
+{
+  "name": "open-code-agent",
+  "displayName": "OpenCodeAgent",
+  "description": "Thin VS Code client for the OpenCodeAgent Python app server.",
+  "version": "0.1.0",
+  "private": true,
+  "engines": { "vscode": "^1.95.0" },
+  "categories": ["Other"],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onView:openCodeAgent.chatView",
+    "onCommand:openCodeAgent.openChat",
+    "onCommand:openCodeAgent.newSession",
+    "onCommand:openCodeAgent.clearSession",
+    "onCommand:openCodeAgent.cancelRun",
+    "onCommand:openCodeAgent.restartRuntime"
+  ],
+  "contributes": {
+    "viewsContainers": { "activitybar": [{ "id": "openCodeAgent", "title": "OpenCodeAgent", "icon": "media/icon.svg" }] },
+    "views": { "openCodeAgent": [{ "id": "openCodeAgent.chatView", "name": "Chat", "type": "webview" }] },
+    "commands": [
+      { "command": "openCodeAgent.openChat", "title": "OpenCodeAgent: Open Chat" },
+      { "command": "openCodeAgent.newSession", "title": "OpenCodeAgent: New Session" },
+      { "command": "openCodeAgent.clearSession", "title": "OpenCodeAgent: Clear Session" },
+      { "command": "openCodeAgent.cancelRun", "title": "OpenCodeAgent: Cancel Run" },
+      { "command": "openCodeAgent.restartRuntime", "title": "OpenCodeAgent: Restart Runtime" },
+      { "command": "openCodeAgent.refreshProfiles", "title": "OpenCodeAgent: Refresh Profiles" },
+      { "command": "openCodeAgent.showOutput", "title": "OpenCodeAgent: Show Output" },
+      { "command": "openCodeAgent.openSettings", "title": "OpenCodeAgent: Open Settings" }
+    ],
+    "configuration": {
+      "title": "OpenCodeAgent",
+      "properties": {
+        "openCodeAgent.server.executable": { "type": "string", "default": "open-code-agent", "description": "Python app-server executable. Controlled only by VS Code settings." },
+        "openCodeAgent.server.arguments": { "type": "array", "default": ["app-server"], "items": { "type": "string" }, "description": "Arguments supplied separately to the configured executable." },
+        "openCodeAgent.server.cwd": { "type": "string", "default": "", "description": "Optional server process working directory. Empty uses the selected workspace." },
+        "openCodeAgent.server.startupTimeoutMs": { "type": "number", "default": 10000, "minimum": 1000 },
+        "openCodeAgent.server.shutdownTimeoutMs": { "type": "number", "default": 5000, "minimum": 500 },
+        "openCodeAgent.server.logLevel": { "type": "string", "default": "info", "enum": ["error", "warn", "info", "debug"] },
+        "openCodeAgent.defaultProfile": { "type": "string", "default": "" },
+        "openCodeAgent.defaultModel": { "type": "string", "default": "" },
+        "openCodeAgent.defaultMode": { "type": "string", "default": "plan", "enum": ["plan", "ask", "auto-edit"] },
+        "openCodeAgent.maxRestarts": { "type": "number", "default": 3, "minimum": 0 },
+        "openCodeAgent.debug": { "type": "boolean", "default": true }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "lint": "eslint src test --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:integration": "vitest run test/integration --passWithNoTests",
+    "protocol:generate": "node scripts/generate-protocol.mjs",
+    "protocol:check": "node scripts/generate-protocol.mjs --check",
+    "package": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "@types/vscode": "^1.95.0",
+    "@typescript-eslint/eslint-plugin": "^8.18.0",
+    "@typescript-eslint/parser": "^8.18.0",
+    "esbuild": "^0.24.0",
+    "eslint": "^9.16.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "openCodeAgent.server.executable": "/home/sachin.kumar/py/open-coding-agent/.venv/bin/open-code-agent",
+  "openCodeAgent.server.arguments": [
+    "app-server"
+  ],
+  "openCodeAgent.server.cwd": "/home/sachin.kumar/py/open-coding-agent",
+  "openCodeAgent.server.startupTimeoutMs": 30000,
+  "openCodeAgent.server.shutdownTimeoutMs": 5000,
+  "openCodeAgent.server.logLevel": "debug",
+
+  "openCodeAgent.defaultProfile": "local-ollama",
+  "openCodeAgent.defaultModel": "qwen3:4b",
+  "openCodeAgent.defaultMode": "plan",
+
+  "openCodeAgent.maxRestarts": 3,
+  "openCodeAgent.debug": true
+}

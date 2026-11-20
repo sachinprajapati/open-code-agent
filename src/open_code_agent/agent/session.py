@@ -10,6 +10,7 @@ from open_code_agent.providers import (
     EnvironmentSecretResolver,
     OpenAICompatibleProfile,
     OpenAICompatibleProvider,
+    OpenAIResponsesProvider,
     SecretResolver,
 )
 from open_code_agent.tools import (
@@ -41,7 +42,7 @@ class AgentSession:
     workspace: WorkspaceContext
     mode: AgentMode
     runner: AgentRunner
-    provider: OpenAICompatibleProvider
+    provider: OpenAICompatibleProvider | OpenAIResponsesProvider
     tools: ToolRegistry
     limits: AgentLimits
 
@@ -81,10 +82,16 @@ def build_agent_session(
         tools.register(ProposePatchTool(PatchProposalStore(workspace), patch_approvals))
         if command_policy is not None and command_approvals is not None:
             tools.register(RunCommandTool(workspace, command_policy, command_approvals))
-    provider = OpenAICompatibleProvider(
-        profile.model_copy(deep=True),
-        secret_resolver=secret_resolver or EnvironmentSecretResolver(),
-    )
+    provider: OpenAICompatibleProvider | OpenAIResponsesProvider
+    profile_copy = profile.model_copy(deep=True)
+    if profile_copy.api == "responses":
+        provider = OpenAIResponsesProvider(
+            profile_copy, secret_resolver=secret_resolver or EnvironmentSecretResolver()
+        )
+    else:
+        provider = OpenAICompatibleProvider(
+            profile_copy, secret_resolver=secret_resolver or EnvironmentSecretResolver()
+        )
     effective_limits = (limits or AgentLimits()).model_copy(deep=True)
     return AgentSession(
         profile=profile.model_copy(deep=True),

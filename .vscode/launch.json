@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run OpenCodeAgent Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "preLaunchTask": "build-open-code-agent-extension",
+      "args": [
+        "${workspaceFolder}",
+        "--extensionDevelopmentPath=${workspaceFolder}/vscode-extension"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/vscode-extension/dist/**/*.js"
+      ]
+    }
+  ]
+}
