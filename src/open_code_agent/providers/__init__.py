@@ -43,8 +43,10 @@ __all__ = [
 ]
 
 
-def provider_for_profile(profile: OpenAICompatibleProfile) -> ManagedModelProvider:
+def provider_for_profile(
+    profile: OpenAICompatibleProfile, *, secret_resolver: SecretResolver | None = None
+) -> ManagedModelProvider:
     """Construct the API adapter explicitly selected by a stored profile."""
     if profile.api == "responses":
-        return OpenAIResponsesProvider(profile)
-    return OpenAICompatibleProvider(profile)
+        return OpenAIResponsesProvider(profile, secret_resolver=secret_resolver)
+    return OpenAICompatibleProvider(profile, secret_resolver=secret_resolver)

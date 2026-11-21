@@ -218,11 +218,18 @@ class ProviderProfileStore:
 
     @staticmethod
     def _validate_persistable(profile: OpenAICompatibleProfile) -> None:
-        """Accept only references the built-in resolver can safely interpret."""
+        """Accept explicit environment or editor-host secret references.
+
+        ``vscode:<profile-id>`` is an opaque reference resolved by a connected
+        editor at request time.  No key is ever written to this file.
+        """
         if (
             profile.api_key_secret_ref is not None
-            and not profile.api_key_secret_ref.startswith("env:")
+            and not (
+                profile.api_key_secret_ref.startswith("env:")
+                or profile.api_key_secret_ref.startswith("vscode:")
+            )
         ):
             raise ProfileStoreError(
-                "Persistent API-key configuration must be an env: secret reference."
+                "Persistent API-key configuration must be an env: or vscode: secret reference."
             )

@@ -71,3 +71,12 @@ to its stdin, parse only JSON lines from stdout, route server requests while it
 continues reading events, then send `shutdown` followed by `exit` before waiting
 for process termination. This server intentionally has no HTTP, TCP, WebSocket,
 MCP, PTY, remote execution, or conversation persistence support.
+
+## Editor-hosted secrets
+
+For VS Code-managed profiles, the persisted profile contains only an opaque
+`vscode:<profile-id>` reference.  When a provider operation needs it, the app
+server makes the dedicated `secret/resolve` request to its connected extension.
+The response is request-scoped, is not emitted as an event or persisted, and
+must not be logged.  It is passed only to the provider HTTP authorization
+header and never to the model.

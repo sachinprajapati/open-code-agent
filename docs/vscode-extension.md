@@ -32,7 +32,15 @@ No runtime is bundled or downloaded.
 The extension uses VS Code's primary workspace folder per in-memory agent
 session. Changing folders invalidates the session. Profiles are listed from the existing Python
 profile store; create or update profiles only with `open-code-agent provider`.
-The UI never requests API keys or displays secret references.
+Provider profiles can be managed in the sidebar.  The Python profile registry
+remains the source of the provider name, endpoint, model, and timeout; the
+extension stores an API key separately in VS Code SecretStorage under a
+profile-ID namespaced key.  A profile response contains only whether
+authentication is configured—never the key or its secret reference.  Empty
+key fields preserve an existing key; replacing a key is explicit and deleting
+a profile deletes its corresponding SecretStorage entry.  Connection tests and
+model refreshes use the selected profile.  If an endpoint lacks `/models`, use
+a manually entered model name.
 
 ## Operation and safety
 
@@ -68,7 +76,7 @@ For persistent local diagnostics, the extension also writes lifecycle and RPC
 metadata (never prompt text or secrets) to
 `.open-code-agent/extension.log` in the primary workspace folder.
 
-Current MVP limitations: no provider-management UI, bundled runtime,
-SecretStorage key management, persistent conversations, multi-root sessions,
+Current MVP limitations: only OpenAI-compatible chat-completions endpoints,
+no bundled runtime, persistent conversations, multi-root sessions,
 multiple concurrent chats, Marketplace publishing, MCP, or native
 Anthropic/Gemini adapters.

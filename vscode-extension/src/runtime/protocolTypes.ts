@@ -1,7 +1,7 @@
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 export type JsonObject = { [key: string]: Json };
 export type RpcId = string | number;
-export interface Profile { profile_id: string; display_name: string; default_model: string; authentication_configured: boolean; is_default: boolean; }
+export interface Profile { profile_id: string; display_name: string; base_url: string; default_model: string; authentication_configured: boolean; is_default: boolean; hasApiKey?: boolean; }
 export interface Model { id: string; display_name: string; }
 export type Mode = "plan" | "ask" | "auto-edit";
 export interface AgentEvent { session_id: string; run_id: string; sequence: number; type: string; payload: JsonObject; timestamp: string; }

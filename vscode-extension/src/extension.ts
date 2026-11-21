@@ -5,13 +5,22 @@ import { registerCommands } from "./commands";
 import { configuration } from "./configuration";
 import { Logger } from "./logging";
 import { AppServerProcess } from "./runtime/appServerProcess";
+import type { JsonRpcClient } from "./runtime/jsonRpcClient";
 import { SessionController } from "./sessions/sessionController";
 import { ChatViewProvider } from "./webview/chatViewProvider";
 
 let shutdown: (() => Promise<void>) | undefined;
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const logger = new Logger(() => configuration().debug); const primaryWorkspace = vscode.workspace.workspaceFolders?.[0]; const developmentRoot = context.extensionMode === vscode.ExtensionMode.Development ? dirname(context.extensionUri.fsPath) : undefined; const diagnosticRoot = primaryWorkspace?.uri.scheme === "file" ? primaryWorkspace.uri.fsPath : developmentRoot; if (diagnosticRoot) await logger.enableFile(join(diagnosticRoot, ".open-code-agent", "extension.log")); const developmentWorkspace = developmentRoot ? { uri: vscode.Uri.file(developmentRoot), name: basename(developmentRoot), index: 0 } : undefined; const runtime = new AppServerProcess(logger); const sessions = new SessionController(runtime, logger, developmentWorkspace);
-  let view: ChatViewProvider; const approvals = new ApprovalController(runtime, (approval) => view.approval(approval), (message) => view.status(message)); view = new ChatViewProvider(context.extensionUri, sessions, approvals); sessions.setApprovals(approvals);
+  runtime.on("rpcReady", (rpc: JsonRpcClient) => rpc.registerRequestHandler("secret/resolve", async (params) => {
+    const reference = params.secret_ref;
+    if (typeof reference !== "string" || !/^vscode:[a-z0-9][a-z0-9_.-]*$/.test(reference)) return {} as Record<string, never>;
+    const secret = await context.secrets.get(`openCodeAgent.providerApiKey.${reference.slice("vscode:".length)}`);
+    // A secret is returned only over the existing private stdio protocol to
+    // satisfy this request; it is neither logged nor retained in webview state.
+    return secret ? { secret } : {};
+  }));
+  let view: ChatViewProvider; const approvals = new ApprovalController(runtime, (approval) => view.approval(approval), (message) => view.status(message)); view = new ChatViewProvider(context.extensionUri, sessions, approvals, runtime, context.secrets); sessions.setApprovals(approvals);
   runtime.on("approval", (approval) => { approvals.request(approval); });
   context.subscriptions.push(logger, sessions, view, vscode.window.registerWebviewViewProvider("openCodeAgent.chatView", view, { webviewOptions: { retainContextWhenHidden: true } })); registerCommands(context, view, sessions, runtime, logger);
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100); status.command = "openCodeAgent.openChat"; status.text = "$(hubot) OpenCodeAgent: starting"; context.subscriptions.push(status); status.show();

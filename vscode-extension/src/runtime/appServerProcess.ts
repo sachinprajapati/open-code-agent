@@ -51,6 +51,9 @@ export class AppServerProcess extends EventEmitter {
       throw error;
     }
   }
+  registerServerRequestHandler(method: string, handler: (params: JsonObject) => Promise<Json | undefined>): void {
+    this.rpc?.registerRequestHandler(method, handler);
+  }
   notify(method: string, params: JsonObject = {}): Promise<void> { return this.rpc ? this.rpc.notify(method, params) : Promise.reject(new ProtocolError("Runtime is unavailable.")); }
   async stop(): Promise<void> {
     if (this.stopping) return this.stopping;
@@ -71,6 +74,7 @@ export class AppServerProcess extends EventEmitter {
       child.on("exit", (code, signal) => { rpc.disconnect(`Runtime exited (${code ?? "none"}/${signal ?? "none"}).`); if (this.state !== "stopping" && this.state !== "stopped") this.fail(`Runtime exited unexpectedly (${code ?? "none"}/${signal ?? "none"}).`); });
       rpc.on("notification", (method: string, params: JsonObject) => this.emit("notification", method, params));
       rpc.registerRequestHandler("approval/request", async (params) => { this.emit("approval", params); return await new Promise<Json>((resolve) => this.once(`approval:${String(params.approval_id)}`, resolve)); });
+      this.emit("rpcReady", rpc);
       const initialized = await rpc.request("initialize", { client_name: "OpenCodeAgent VS Code", client_version: "0.1.0", supported_protocol_versions: [PROTOCOL_VERSION], client_capabilities: { approvals: true, streaming_events: true, cancellation: true } }, config.startupTimeoutMs) as unknown as InitializeResult;
       if (initialized.selected_protocol_version !== PROTOCOL_VERSION) throw new ProtocolError("The app server selected an incompatible protocol version.");
       for (const capability of Object.keys(REQUIRED_CAPABILITIES)) if (!initialized.capabilities?.[capability]) throw new ProtocolError(`The app server lacks required capability: ${capability}`);

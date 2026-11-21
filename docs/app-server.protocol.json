@@ -17,6 +17,14 @@
     },
     {
       "direction": "client_to_server",
+      "name": "profiles/create"
+    },
+    {
+      "direction": "client_to_server",
+      "name": "profiles/delete"
+    },
+    {
+      "direction": "client_to_server",
       "name": "profiles/get"
     },
     {
@@ -25,7 +33,15 @@
     },
     {
       "direction": "client_to_server",
+      "name": "profiles/set-default"
+    },
+    {
+      "direction": "client_to_server",
       "name": "profiles/test"
+    },
+    {
+      "direction": "client_to_server",
+      "name": "profiles/update"
     },
     {
       "direction": "client_to_server",
@@ -62,6 +78,10 @@
     {
       "direction": "server_to_client",
       "name": "approval/request"
+    },
+    {
+      "direction": "server_to_client",
+      "name": "secret/resolve"
     }
   ],
   "notifications": [

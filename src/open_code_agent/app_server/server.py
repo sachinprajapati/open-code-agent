@@ -60,8 +60,10 @@ from open_code_agent.app_server.transport import AsyncLineTransport, TransportEr
 from open_code_agent.execution import CommandExecutionPolicy
 from open_code_agent.persistence import ProfileNotFoundError, ProviderProfileStore
 from open_code_agent.providers import (
+    EnvironmentSecretResolver,
     ManagedModelProvider,
     OpenAICompatibleProfile,
+    SecretResolver,
     provider_for_profile,
 )
 from open_code_agent.workspace import (
@@ -76,6 +78,10 @@ _STATEFUL_METHODS = frozenset(
     {
         "profiles/list",
         "profiles/get",
+        "profiles/create",
+        "profiles/update",
+        "profiles/delete",
+        "profiles/set-default",
         "profiles/test",
         "models/list",
         "session/create",
@@ -93,6 +99,22 @@ SessionBuilder = Callable[..., AgentSession]
 ProviderBuilder = Callable[[OpenAICompatibleProfile], ManagedModelProvider]
 
 
+class _EditorSecretResolver:
+    """Resolve opaque VS Code references only for the request using them."""
+
+    def __init__(self, server: "AppServer") -> None:
+        self._server = server
+
+    async def resolve(self, secret_ref: str) -> str:
+        if secret_ref.startswith("env:"):
+            return await EnvironmentSecretResolver().resolve(secret_ref)
+        if not secret_ref.startswith("vscode:"):
+            from open_code_agent.providers.secrets import InvalidSecretReferenceError
+
+            raise InvalidSecretReferenceError("Unsupported secret reference.")
+        return await self._server._editor_secret(secret_ref)
+
+
 class AppServer:
     """A bounded server instance for one IDE/editor stdio connection."""
 
@@ -104,12 +126,14 @@ class AppServer:
         limits: AppServerLimits | None = None,
         session_builder: SessionBuilder = build_agent_session,
         provider_builder: ProviderBuilder = provider_for_profile,
+        secret_resolver: SecretResolver | None = None,
     ) -> None:
         self._transport = transport
         self._profile_store = profile_store
         self._limits = (limits or AppServerLimits()).model_copy(deep=True)
         self._session_builder = session_builder
         self._provider_builder = provider_builder
+        self._secret_resolver = secret_resolver or _EditorSecretResolver(self)
         self._sessions = SessionRegistry(self._limits.max_sessions)
         self._initialized = False
         self._shutting_down = False
@@ -179,6 +203,10 @@ class AppServer:
         handlers: dict[str, Callable[[dict[str, Any]], Awaitable[Any]]] = {
             "profiles/list": self._profiles_list,
             "profiles/get": self._profiles_get,
+            "profiles/create": self._profiles_create,
+            "profiles/update": self._profiles_update,
+            "profiles/delete": self._profiles_delete,
+            "profiles/set-default": self._profiles_set_default,
             "profiles/test": self._profiles_test,
             "models/list": self._models_list,
             "session/create": self._session_create,
@@ -274,9 +302,62 @@ class AppServer:
             )
         }
 
+    def _profile_from_params(self, params: dict[str, Any]) -> OpenAICompatibleProfile:
+        raw = params.get("profile")
+        if not isinstance(raw, dict):
+            raise AppServerError(INVALID_PARAMS, "profile must be an object.")
+        # This is intentionally a small, non-secret UI schema.  Authentication
+        # is exclusively an editor-host concern.
+        allowed = {"profile_id", "display_name", "base_url", "default_model", "request_timeout_seconds"}
+        if set(raw).difference(allowed):
+            raise AppServerError(INVALID_PARAMS, "Unsupported provider profile field.")
+        try:
+            return OpenAICompatibleProfile.model_validate({
+                **raw, "api_key_secret_ref": f"vscode:{raw.get('profile_id', '')}"
+            })
+        except ValidationError as error:
+            raise AppServerError(INVALID_PARAMS, "Provider profile is invalid.") from error
+
+    async def _profiles_create(self, params: dict[str, Any]) -> dict[str, Any]:
+        profile = self._profile_from_params(params)
+        try:
+            self._profile_store.add(profile)
+        except Exception as error:
+            raise AppServerError(INVALID_PARAMS, "Provider profile could not be created.") from error
+        return {"profile": safe_profile(profile)}
+
+    async def _profiles_update(self, params: dict[str, Any]) -> dict[str, Any]:
+        profile = self._profile_from_params(params)
+        try:
+            existing = self._profile_store.get(profile.profile_id)
+            if existing.api_key_secret_ref and not existing.api_key_secret_ref.startswith("vscode:"):
+                profile = profile.model_copy(update={"api_key_secret_ref": existing.api_key_secret_ref})
+            self._profile_store.update(profile)
+        except ProfileNotFoundError as error:
+            raise AppServerError(PROFILE_NOT_FOUND, "Provider profile was not found.") from error
+        except Exception as error:
+            raise AppServerError(INVALID_PARAMS, "Provider profile could not be updated.") from error
+        return {"profile": safe_profile(profile, is_default=profile.profile_id == self._profile_store.default_profile_id())}
+
+    async def _profiles_delete(self, params: dict[str, Any]) -> dict[str, Any]:
+        profile = self._profile_param(params)
+        try:
+            self._profile_store.remove(profile.profile_id)
+            remaining = self._profile_store.list()
+            if remaining and self._profile_store.default_profile_id() is None:
+                self._profile_store.set_default(remaining[0].profile_id)
+        except Exception as error:
+            raise AppServerError(PROVIDER_FAILURE, "Provider profile could not be deleted.") from error
+        return {"profile_id": profile.profile_id, "default_profile_id": self._profile_store.default_profile_id()}
+
+    async def _profiles_set_default(self, params: dict[str, Any]) -> dict[str, Any]:
+        profile = self._profile_param(params)
+        self._profile_store.set_default(profile.profile_id)
+        return {"profile_id": profile.profile_id}
+
     async def _profiles_test(self, params: dict[str, Any]) -> dict[str, Any]:
         profile = self._profile_param(params)
-        provider = self._provider_builder(profile)
+        provider = self._provider(profile)
         try:
             result = await provider.validate_configuration()
         except asyncio.CancelledError:
@@ -292,7 +373,7 @@ class AppServer:
 
     async def _models_list(self, params: dict[str, Any]) -> dict[str, Any]:
         profile = self._profile_param(params, optional=True)
-        provider = self._provider_builder(profile)
+        provider = self._provider(profile)
         try:
             models = await provider.list_models()
         except asyncio.CancelledError:
@@ -352,6 +433,7 @@ class AppServer:
                 command_policy=CommandExecutionPolicy(execution_enabled=True),
                 command_approvals=approvals,
                 patch_approvals=approvals,
+                secret_resolver=self._secret_resolver,
             )
             record = await self._sessions.add(session)
         except RuntimeError as error:
@@ -566,6 +648,44 @@ class AppServer:
         await self._event(
             record.session_id, run_id, active.sequence, event_type, payload
         )
+
+    def _provider(self, profile: OpenAICompatibleProfile) -> ManagedModelProvider:
+        """Use editor secrets on the production builder, preserving test fakes."""
+        if self._provider_builder is provider_for_profile:
+            return provider_for_profile(profile, secret_resolver=self._secret_resolver)
+        return self._provider_builder(profile)
+
+    async def _editor_secret(self, secret_ref: str) -> str:
+        result = await self._client_request("secret/resolve", {"secret_ref": secret_ref})
+        secret = result.get("secret") if isinstance(result, dict) else None
+        if not isinstance(secret, str) or not secret:
+            from open_code_agent.providers.secrets import SecretNotFoundError
+
+            raise SecretNotFoundError("Provider API key is not configured in VS Code SecretStorage.")
+        return secret
+
+    async def _client_request(
+        self, method: str, params: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        if self._shutting_down or len(self._pending) >= self._limits.max_pending_server_requests:
+            return None
+        self._request_counter += 1
+        request_id = f"server:secret:{self._request_counter}"
+        future: asyncio.Future[dict[str, Any] | None] = (
+            asyncio.get_running_loop().create_future()
+        )
+        self._pending[request_id] = future
+        try:
+            await self._transport.send(
+                {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
+            )
+            return await asyncio.wait_for(
+                future, timeout=self._limits.approval_timeout_seconds
+            )
+        except (TimeoutError, TransportError):
+            return None
+        finally:
+            self._pending.pop(request_id, None)
 
     async def _approval_request(self, params: dict[str, Any]) -> dict[str, Any] | None:
         if (
