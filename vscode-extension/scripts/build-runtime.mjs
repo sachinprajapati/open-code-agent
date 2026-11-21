@@ -1,0 +1,26 @@
+import { spawnSync } from "node:child_process";
+import { chmodSync, mkdirSync, rmSync } from "node:fs";
+import { join, resolve } from "node:path";
+import process from "node:process";
+
+const targets = { linux: "linux", darwin: "darwin", win32: "win32" };
+const os = targets[process.platform];
+const cpu = process.arch;
+if (!os || !["x64", "arm64"].includes(cpu) || (os === "win32" && cpu !== "x64")) throw new Error(`Unsupported native build host: ${process.platform}/${cpu}`);
+const target = `${os}-${cpu}`;
+const extensionRoot = resolve(".");
+const root = resolve("..");
+const out = join(extensionRoot, "runtime", target);
+const name = process.platform === "win32" ? "open-code-agent.exe" : "open-code-agent";
+rmSync(out, { recursive: true, force: true });
+mkdirSync(out, { recursive: true });
+const buildRoot = join(extensionRoot, ".runtime-build", target);
+mkdirSync(buildRoot, { recursive: true });
+const result = spawnSync("uv", ["run", "--with", "pyinstaller==6.11.1", "pyinstaller", "--noconfirm", "--clean", "--onefile", "--name", "open-code-agent", "--distpath", out, "--workpath", buildRoot, "--specpath", buildRoot, "src/open_code_agent/runtime_entry.py"], { cwd: root, stdio: "inherit", shell: false, env: { ...process.env, UV_CACHE_DIR: join(buildRoot, "uv-cache") } });
+if (result.error) throw result.error;
+if (result.status !== 0) process.exit(result.status ?? 1);
+const executable = join(out, name);
+if (process.platform !== "win32") chmodSync(executable, 0o755);
+const check = spawnSync(executable, ["--runtime-info"], { stdio: "inherit", shell: false });
+if (check.status !== 0) process.exit(check.status ?? 1);
+console.log(`Built native ${target} runtime: ${executable}`);

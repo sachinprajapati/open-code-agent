@@ -1,0 +1,54 @@
+name: Extension packages
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target: linux-x64
+            python: "3.12"
+          - runner: macos-latest
+            target: darwin-arm64
+            python: "3.12"
+          - runner: macos-13
+            target: darwin-x64
+            python: "3.12"
+          - runner: windows-latest
+            target: win32-x64
+            python: "3.12"
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: vscode-extension/package-lock.json
+      - run: uv python install ${{ matrix.python }}
+      - run: uv sync --all-groups --python ${{ matrix.python }}
+      - run: uv run ruff check src/open_code_agent/runtime_entry.py
+      - run: uv run pytest
+      - run: npm ci
+        working-directory: vscode-extension
+      - run: npm run lint && npm run typecheck && npm test && npm run compile
+        working-directory: vscode-extension
+      - run: npm run build:runtime
+        working-directory: vscode-extension
+      - run: node scripts/package.mjs ${{ matrix.target }}
+        working-directory: vscode-extension
+      - uses: actions/upload-artifact@v4
+        with:
+          name: open-code-agent-${{ matrix.target }}
+          path: artifacts/open-code-agent-${{ matrix.target }}.vsix*
+          if-no-files-found: error

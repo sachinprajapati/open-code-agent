@@ -10,6 +10,8 @@ import type { ApprovalRequest, InitializeResult, Json, JsonObject } from "./prot
 
 export type RuntimeState = "stopped" | "starting" | "ready" | "stopping" | "failed";
 type SpawnProcess = typeof spawn;
+type ProcessGroupSignal = (pid: number, signal: NodeJS.Signals) => void;
+type ProcessGroupAlive = (pid: number) => boolean;
 
 export class AppServerProcess extends EventEmitter {
   private process: ChildProcessWithoutNullStreams | undefined;
@@ -18,12 +20,18 @@ export class AppServerProcess extends EventEmitter {
   private starting: Promise<void> | undefined;
   private stopping: Promise<void> | undefined;
   private restarts = 0;
+  private readonly approvalWaiters = new Set<(result: Json) => void>();
   capabilities: Record<string, boolean> = {};
   constructor(
     private readonly logger: Logger,
     private readonly getConfig: () => ServerConfiguration = configuration,
     private readonly spawnProcess: SpawnProcess = spawn,
     private readonly platform = process.platform,
+    private readonly signalProcessGroup: ProcessGroupSignal = (pid, signal) => process.kill(-pid, signal),
+    private readonly processGroupAlive: ProcessGroupAlive = (pid) => {
+      try { process.kill(-pid, 0); return true; }
+      catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
+    },
   ) { super(); }
   get runtimeState(): RuntimeState { return this.state; }
   async start(): Promise<void> {
@@ -60,7 +68,13 @@ export class AppServerProcess extends EventEmitter {
     this.stopping = this.stopInternal().finally(() => { this.stopping = undefined; });
     return this.stopping;
   }
-  async dispose(): Promise<void> { await this.stop(); this.removeAllListeners(); }
+  async dispose(): Promise<void> {
+    for (const resolve of this.approvalWaiters) resolve(null);
+    this.approvalWaiters.clear();
+    await this.stop();
+    this.restarts = 0;
+    this.removeAllListeners();
+  }
   private async startInternal(): Promise<void> {
     const config = this.getConfig(); this.transition("starting");
     try {
@@ -73,7 +87,15 @@ export class AppServerProcess extends EventEmitter {
       child.on("error", (error) => this.fail(`Unable to start runtime: ${error.message}`));
       child.on("exit", (code, signal) => { rpc.disconnect(`Runtime exited (${code ?? "none"}/${signal ?? "none"}).`); if (this.state !== "stopping" && this.state !== "stopped") this.fail(`Runtime exited unexpectedly (${code ?? "none"}/${signal ?? "none"}).`); });
       rpc.on("notification", (method: string, params: JsonObject) => this.emit("notification", method, params));
-      rpc.registerRequestHandler("approval/request", async (params) => { this.emit("approval", params); return await new Promise<Json>((resolve) => this.once(`approval:${String(params.approval_id)}`, resolve)); });
+      rpc.registerRequestHandler("approval/request", async (params) => {
+        this.emit("approval", params);
+        return await new Promise<Json>((resolve) => {
+          const event = `approval:${String(params.approval_id)}`;
+          const finish = (result: Json) => { this.approvalWaiters.delete(finish); this.removeListener(event, finish); resolve(result); };
+          this.approvalWaiters.add(finish);
+          this.once(event, finish);
+        });
+      });
       this.emit("rpcReady", rpc);
       const initialized = await rpc.request("initialize", { client_name: "OpenCodeAgent VS Code", client_version: "0.1.0", supported_protocol_versions: [PROTOCOL_VERSION], client_capabilities: { approvals: true, streaming_events: true, cancellation: true } }, config.startupTimeoutMs) as unknown as InitializeResult;
       if (initialized.selected_protocol_version !== PROTOCOL_VERSION) throw new ProtocolError("The app server selected an incompatible protocol version.");
@@ -94,7 +116,18 @@ export class AppServerProcess extends EventEmitter {
     const child = this.process; const rpc = this.rpc;
     if (!child) { rpc?.dispose(); this.rpc = undefined; this.capabilities = {}; this.transition("stopped"); return; }
     this.transition("stopping");
-    try { await this.terminate(child, this.getConfig().shutdownTimeoutMs); }
+    try {
+      // The protocol shutdown lets the server close sessions and reap its own
+      // workers before we fall back to signals for the whole owned group.
+      if (this.rpc && this.isAlive(child)) {
+        try { await this.rpc.request("shutdown", {}, Math.min(500, this.getConfig().shutdownTimeoutMs)); }
+        catch { /* The server may already be exiting or the connection may be broken. */ }
+      }
+      child.stdin.end();
+      child.stdout.destroy();
+      child.stderr.destroy();
+      await this.terminate(child, this.getConfig().shutdownTimeoutMs);
+    }
     finally {
       rpc?.dispose(); this.clearChild(child);
       if (this.process === child) this.process = undefined;
@@ -103,20 +136,37 @@ export class AppServerProcess extends EventEmitter {
     }
   }
   private async terminate(child: ChildProcessWithoutNullStreams, timeout: number): Promise<void> {
-    if (!this.isAlive(child)) return;
+    if (!this.isOwnedProcessAlive(child)) return;
     this.signal(child, "SIGTERM");
-    if (await this.waitForExit(child, timeout)) return;
+    if (await this.waitForOwnedProcessExit(child, timeout)) return;
     this.logger.info("Runtime did not exit after SIGTERM; sending SIGKILL.");
-    this.signal(child, "SIGKILL");
-    await this.waitForExit(child, timeout);
+    if (this.platform === "win32" && child.pid) this.killWindowsProcessTree(child.pid);
+    else this.signal(child, "SIGKILL");
+    await this.waitForOwnedProcessExit(child, timeout);
+  }
+  private killWindowsProcessTree(pid: number): void {
+    const killer = this.spawnProcess("taskkill", ["/pid", String(pid), "/T", "/F"], { shell: false, stdio: "ignore", windowsHide: true });
+    killer.on("error", (error) => this.logger.debug(`Could not terminate runtime process tree: ${error.message}`));
   }
   private signal(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals): void {
     try {
-      if (this.platform !== "win32" && child.pid) process.kill(-child.pid, signal);
+      if (this.platform !== "win32" && child.pid) this.signalProcessGroup(child.pid, signal);
       else child.kill(signal);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ESRCH") this.logger.debug(`Could not send ${signal}: ${error instanceof Error ? error.message : "unknown error"}`);
     }
+  }
+  private isOwnedProcessAlive(child: ChildProcessWithoutNullStreams): boolean {
+    if (this.isAlive(child)) return true;
+    if (this.platform === "win32" || !child.pid) return false;
+    return this.processGroupAlive(child.pid);
+  }
+  private async waitForOwnedProcessExit(child: ChildProcessWithoutNullStreams, timeout: number): Promise<boolean> {
+    const deadline = Date.now() + timeout;
+    while (this.isOwnedProcessAlive(child) && Date.now() < deadline) {
+      await new Promise<void>((resolve) => setTimeout(resolve, Math.min(50, Math.max(1, deadline - Date.now()))));
+    }
+    return !this.isOwnedProcessAlive(child);
   }
   private async waitForExit(child: ChildProcessWithoutNullStreams, timeout: number): Promise<boolean> {
     if (!this.isAlive(child)) return true;

@@ -54,11 +54,25 @@ describe("AppServerProcess lifecycle", () => {
     expect(runtime.runtimeState).toBe("stopped");
   });
 
-  it("uses SIGKILL only after the graceful timeout", async () => {
-    const child = new FakeChild(false);
-    const runtime = new AppServerProcess(logger, () => config, (() => asChild(child)) as unknown as Spawn, "win32");
+  it("uses structured argv with shell execution disabled", async () => {
+    const child = new FakeChild();
+    const spawn = ((_command: string, args: readonly string[], options: SpawnOptionsWithoutStdio) => {
+      expect(args).toEqual(config.arguments);
+      expect(options.shell).toBe(false);
+      return asChild(child);
+    }) as unknown as Spawn;
+    const runtime = new AppServerProcess(logger, () => config, spawn, "win32");
     await runtime.start(); await runtime.stop();
-    expect(child.signals).toEqual(["SIGTERM", "SIGKILL"]);
+  });
+
+  it("terminates the complete Windows process tree after the graceful timeout", async () => {
+    const child = new FakeChild(false);
+    const calls: Array<{ executable: string; args: readonly string[] }> = [];
+    const spawn = ((executable: string, args: readonly string[]) => { calls.push({ executable, args }); return asChild(child); }) as unknown as Spawn;
+    const runtime = new AppServerProcess(logger, () => config, spawn, "win32");
+    await runtime.start(); await runtime.stop();
+    expect(child.signals).toEqual(["SIGTERM"]);
+    expect(calls).toContainEqual({ executable: "taskkill", args: ["/pid", "42", "/T", "/F"] });
   });
 
   it("does not create duplicate children and can start a clean runtime after reload cleanup", async () => {
@@ -67,7 +81,7 @@ describe("AppServerProcess lifecycle", () => {
       expect(options.detached).toBe(true);
       const child = new FakeChild(); children.push(child); return asChild(child);
     }) as unknown as Spawn;
-    const runtime = new AppServerProcess(logger, () => config, spawn, "linux");
+    const runtime = new AppServerProcess(logger, () => config, spawn, "linux", (pid, signal) => children.find((child) => child.pid === pid)?.kill(signal), () => children.some((child) => child.exitCode === null && child.signalCode === null));
     await Promise.all([runtime.start(), runtime.start()]);
     expect(children).toHaveLength(1);
     await runtime.stop(); await runtime.start();
@@ -81,5 +95,33 @@ describe("AppServerProcess lifecycle", () => {
     await runtime.start(); child.exit("SIGTERM"); await runtime.stop();
     expect(child.signals).toEqual([]);
     expect(runtime.runtimeState).toBe("stopped");
+  });
+
+  it("kills remaining group children after the tracked parent exits", async () => {
+    const parent = new FakeChild(); const childAlive = { value: true }; const signals: NodeJS.Signals[] = [];
+    const runtime = new AppServerProcess(logger, () => config, (() => asChild(parent)) as unknown as Spawn, "linux",
+      (_pid, signal) => { signals.push(signal); parent.exit(signal); if (signal === "SIGKILL") childAlive.value = false; },
+      () => parent.exitCode === null && parent.signalCode === null || childAlive.value);
+    await runtime.start(); await runtime.stop();
+    expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(runtime.runtimeState).toBe("stopped");
+  });
+
+  it("cleans up a packaged executable through the same owned process group", async () => {
+    const child = new FakeChild(); const spawned: string[] = []; const signals: NodeJS.Signals[] = [];
+    const spawn = ((command: string, _args: readonly string[], options: SpawnOptionsWithoutStdio) => { spawned.push(command); expect(options.detached).toBe(true); return asChild(child); }) as unknown as Spawn;
+    const runtime = new AppServerProcess(logger, () => ({ ...config, executable: "/extension/runtime/linux-x64/open-code-agent" }), spawn, "linux", (_pid, signal) => { signals.push(signal); child.exit(signal); }, () => child.exitCode === null && child.signalCode === null);
+    await runtime.start(); await runtime.stop();
+    expect(spawned).toEqual(["/extension/runtime/linux-x64/open-code-agent"]);
+    expect(signals).toEqual(["SIGTERM"]);
+  });
+
+  it("terminates a process group when startup fails", async () => {
+    const child = new FakeChild(); const signals: NodeJS.Signals[] = [];
+    child.stdin.removeAllListeners("data");
+    const runtime = new AppServerProcess(logger, () => config, (() => asChild(child)) as unknown as Spawn, "linux", (_pid, signal) => { signals.push(signal); child.exit(signal); }, () => child.exitCode === null && child.signalCode === null);
+    await expect(runtime.start()).rejects.toThrow();
+    expect(signals).toEqual(["SIGTERM"]);
+    expect(runtime.runtimeState).toBe("failed");
   });
 });

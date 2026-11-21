@@ -11,5 +11,9 @@ htmlcov/
 node_modules/
 dist/
 build/
+vscode-extension/runtime/
+vscode-extension/.runtime-build/
+vscode-extension/.package-stage/
+artifacts/
 *.egg-info/
 .DS_Store

@@ -31,9 +31,10 @@ Anthropic, Gemini, Ollama, and compatible provider adapters.
 
 Not yet implemented: unrestricted shell or terminal access, automatic command
 approval, container sandboxing, Git mutation, conversation persistence,
-provider-management UI, bundled Python runtime, VS Code SecretStorage integration,
-multiple simultaneous sidebar sessions, Marketplace publishing, native
-Anthropic/Gemini adapters, and secure desktop keyring. Workspace inspection remains policy-bound;
+multiple simultaneous sidebar sessions, automatic Marketplace publishing,
+native Anthropic/Gemini adapters, and secure desktop keyring. Platform-specific
+VSIX builds bundle a native app-server runtime; see
+[VS Code installation and packaging](docs/vscode-extension.md). Workspace inspection remains policy-bound;
 see [workspace tools](docs/workspace-tools.md) and [command execution](docs/command-execution.md).
 
 ## Architecture direction

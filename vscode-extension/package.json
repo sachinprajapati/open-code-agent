@@ -1,11 +1,24 @@
 {
   "name": "open-code-agent",
+  "publisher": "open-code-agent",
   "displayName": "OpenCodeAgent",
   "description": "Thin VS Code client for the OpenCodeAgent Python app server.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/open-code-agent/open-code-agent.git"
+  },
+  "homepage": "https://github.com/open-code-agent/open-code-agent#readme",
   "version": "0.1.0",
+  "extensionKind": [
+    "workspace"
+  ],
   "private": true,
-  "engines": { "vscode": "^1.95.0" },
-  "categories": ["Other"],
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
   "main": "./dist/extension.js",
   "activationEvents": [
     "onView:openCodeAgent.chatView",
@@ -13,35 +26,135 @@
     "onCommand:openCodeAgent.newSession",
     "onCommand:openCodeAgent.clearSession",
     "onCommand:openCodeAgent.cancelRun",
-    "onCommand:openCodeAgent.restartRuntime"
+    "onCommand:openCodeAgent.restartRuntime",
+    "onCommand:openCodeAgent.diagnostics"
   ],
   "contributes": {
-    "viewsContainers": { "activitybar": [{ "id": "openCodeAgent", "title": "OpenCodeAgent", "icon": "media/icon.svg" }] },
-    "views": { "openCodeAgent": [{ "id": "openCodeAgent.chatView", "name": "Chat", "type": "webview" }] },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "openCodeAgent",
+          "title": "OpenCodeAgent",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "openCodeAgent": [
+        {
+          "id": "openCodeAgent.chatView",
+          "name": "Chat",
+          "type": "webview"
+        }
+      ]
+    },
     "commands": [
-      { "command": "openCodeAgent.openChat", "title": "OpenCodeAgent: Open Chat" },
-      { "command": "openCodeAgent.newSession", "title": "OpenCodeAgent: New Session" },
-      { "command": "openCodeAgent.clearSession", "title": "OpenCodeAgent: Clear Session" },
-      { "command": "openCodeAgent.cancelRun", "title": "OpenCodeAgent: Cancel Run" },
-      { "command": "openCodeAgent.restartRuntime", "title": "OpenCodeAgent: Restart Runtime" },
-      { "command": "openCodeAgent.refreshProfiles", "title": "OpenCodeAgent: Refresh Profiles" },
-      { "command": "openCodeAgent.showOutput", "title": "OpenCodeAgent: Show Output" },
-      { "command": "openCodeAgent.openSettings", "title": "OpenCodeAgent: Open Settings" }
+      {
+        "command": "openCodeAgent.openChat",
+        "title": "OpenCodeAgent: Open Chat"
+      },
+      {
+        "command": "openCodeAgent.newSession",
+        "title": "OpenCodeAgent: New Session"
+      },
+      {
+        "command": "openCodeAgent.clearSession",
+        "title": "OpenCodeAgent: Clear Session"
+      },
+      {
+        "command": "openCodeAgent.cancelRun",
+        "title": "OpenCodeAgent: Cancel Run"
+      },
+      {
+        "command": "openCodeAgent.restartRuntime",
+        "title": "OpenCodeAgent: Restart Runtime"
+      },
+      {
+        "command": "openCodeAgent.refreshProfiles",
+        "title": "OpenCodeAgent: Refresh Profiles"
+      },
+      {
+        "command": "openCodeAgent.showOutput",
+        "title": "OpenCodeAgent: Show Output"
+      },
+      {
+        "command": "openCodeAgent.openSettings",
+        "title": "OpenCodeAgent: Open Settings"
+      },
+      {
+        "command": "openCodeAgent.diagnostics",
+        "title": "OpenCodeAgent: Runtime Diagnostics"
+      }
     ],
     "configuration": {
       "title": "OpenCodeAgent",
       "properties": {
-        "openCodeAgent.server.executable": { "type": "string", "default": "open-code-agent", "description": "Python app-server executable. Controlled only by VS Code settings." },
-        "openCodeAgent.server.arguments": { "type": "array", "default": ["app-server"], "items": { "type": "string" }, "description": "Arguments supplied separately to the configured executable." },
-        "openCodeAgent.server.cwd": { "type": "string", "default": "", "description": "Optional server process working directory. Empty uses the selected workspace." },
-        "openCodeAgent.server.startupTimeoutMs": { "type": "number", "default": 10000, "minimum": 1000 },
-        "openCodeAgent.server.shutdownTimeoutMs": { "type": "number", "default": 5000, "minimum": 500 },
-        "openCodeAgent.server.logLevel": { "type": "string", "default": "info", "enum": ["error", "warn", "info", "debug"] },
-        "openCodeAgent.defaultProfile": { "type": "string", "default": "" },
-        "openCodeAgent.defaultModel": { "type": "string", "default": "" },
-        "openCodeAgent.defaultMode": { "type": "string", "default": "plan", "enum": ["plan", "ask", "auto-edit"] },
-        "openCodeAgent.maxRestarts": { "type": "number", "default": 3, "minimum": 0 },
-        "openCodeAgent.debug": { "type": "boolean", "default": true }
+        "openCodeAgent.server.executable": {
+          "type": "string",
+          "default": "open-code-agent",
+          "description": "Development-mode app-server executable override."
+        },
+        "openCodeAgent.server.arguments": {
+          "type": "array",
+          "default": [
+            "app-server"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Arguments supplied separately to the configured executable."
+        },
+        "openCodeAgent.server.cwd": {
+          "type": "string",
+          "default": "",
+          "description": "Optional server process working directory. Empty uses the selected workspace."
+        },
+        "openCodeAgent.server.startupTimeoutMs": {
+          "type": "number",
+          "default": 10000,
+          "minimum": 1000
+        },
+        "openCodeAgent.server.shutdownTimeoutMs": {
+          "type": "number",
+          "default": 5000,
+          "minimum": 500
+        },
+        "openCodeAgent.server.logLevel": {
+          "type": "string",
+          "default": "info",
+          "enum": [
+            "error",
+            "warn",
+            "info",
+            "debug"
+          ]
+        },
+        "openCodeAgent.defaultProfile": {
+          "type": "string",
+          "default": ""
+        },
+        "openCodeAgent.defaultModel": {
+          "type": "string",
+          "default": ""
+        },
+        "openCodeAgent.defaultMode": {
+          "type": "string",
+          "default": "plan",
+          "enum": [
+            "plan",
+            "ask",
+            "auto-edit"
+          ]
+        },
+        "openCodeAgent.maxRestarts": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0
+        },
+        "openCodeAgent.debug": {
+          "type": "boolean",
+          "default": true
+        }
       }
     }
   },
@@ -54,13 +167,21 @@
     "test:integration": "vitest run test/integration --passWithNoTests",
     "protocol:generate": "node scripts/generate-protocol.mjs",
     "protocol:check": "node scripts/generate-protocol.mjs --check",
-    "package": "npm run compile"
+    "package": "npm run compile",
+    "build:runtime": "node scripts/build-runtime.mjs",
+    "package:linux-x64": "npm run build:runtime && node scripts/package.mjs linux-x64",
+    "package:darwin-arm64": "npm run build:runtime && node scripts/package.mjs darwin-arm64",
+    "package:darwin-x64": "npm run build:runtime && node scripts/package.mjs darwin-x64",
+    "package:win32-x64": "npm run build:runtime && node scripts/package.mjs win32-x64",
+    "package:all": "node scripts/package-all.mjs",
+    "verify:package": "node scripts/verify-existing-packages.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",
     "@types/vscode": "^1.95.0",
     "@typescript-eslint/eslint-plugin": "^8.18.0",
     "@typescript-eslint/parser": "^8.18.0",
+    "@vscode/vsce": "^3.2.1",
     "esbuild": "^0.24.0",
     "eslint": "^9.16.0",
     "typescript": "^5.7.2",

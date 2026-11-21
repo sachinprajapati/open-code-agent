@@ -1,7 +1,7 @@
-# VS Code extension MVP
+# OpenCodeAgent VS Code extension
 
-`vscode-extension/` is a thin, development-only VS Code client for the Python
-stdio app server. Python remains responsible for provider calls, agent logic,
+`vscode-extension/` is a thin VS Code client for the Python stdio app server.
+Installed target VSIX files include a native frozen runtime. Python remains responsible for provider calls, agent logic,
 workspace policy, tools, approvals, and command execution. The extension owns
 only process supervision, JSON-RPC framing, session presentation, and explicit
 one-time approval UI.
@@ -27,7 +27,76 @@ OpenCodeAgent activity-bar view. Set breakpoints in
 code. The default runtime command is `open-code-agent app-server`. For local
 development, configure `openCodeAgent.server.executable` as `uv` and
 `openCodeAgent.server.arguments` as `['run', 'open-code-agent', 'app-server']`.
-No runtime is bundled or downloaded.
+Extension Development Host mode continues to use this configurable Python/uv
+launcher. Packaged installs use the executable shipped inside the matching
+platform VSIX and ignore those development launcher settings.
+
+## Installing a packaged build
+
+Install VS Code and the VSIX matching the computer's operating system and CPU:
+
+| Computer | Artifact |
+| --- | --- |
+| Linux x64 | `open-code-agent-linux-x64.vsix` |
+| macOS Apple silicon | `open-code-agent-darwin-arm64.vsix` |
+| macOS Intel | `open-code-agent-darwin-x64.vsix` |
+| Windows x64 | `open-code-agent-win32-x64.vsix` |
+
+In VS Code, run **Extensions: Install from VSIX...** and select the downloaded
+file. VS Code is the only runtime prerequisite; Python and uv are not needed.
+Each artifact includes just its matching executable under
+`runtime/<target>/open-code-agent` (or `.exe` on Windows). Provider API keys
+remain in VS Code SecretStorage. Runtime profiles are created under the normal
+per-user OpenCodeAgent data directory, never in the extension installation.
+
+Run **OpenCodeAgent: Runtime Diagnostics** from the Command Palette to see the
+extension version, detected platform and architecture, runtime mode and path,
+and runtime health. Startup errors are also written to the OpenCodeAgent
+Output channel. If VS Code reports a missing or unsupported runtime, install
+the VSIX for the exact OS/architecture shown in diagnostics.
+
+## Building and verifying packages
+
+The native runtime is built with PyInstaller as a dedicated app-server-only
+executable. PyInstaller is used because it freezes the locked Python app and
+its dependencies into a self-contained executable without including a Python
+installation. Native builds must run on the matching operating system and CPU;
+cross-platform binaries are not produced.
+
+On a native build host, from `vscode-extension/`:
+
+```bash
+npm ci
+npm run compile
+npm run build:runtime
+node scripts/package.mjs linux-x64 # replace with this host's target
+```
+
+The convenience commands `package:linux-x64`, `package:darwin-arm64`,
+`package:darwin-x64`, and `package:win32-x64` each build and package for the
+current host; the target must match. `package:all` packages four previously
+built native runtimes and fails if any are missing. `verify:package` validates
+that the executable and target metadata are present and rejects common cache,
+test, profile, and credential paths. Packaging stages only the extension
+manifest, compiled code, media, license, README, and matching runtime.
+
+Packages and SHA-256 sidecars are written to `artifacts/`. Verify a downloaded
+artifact with `sha256sum -c open-code-agent-linux-x64.vsix.sha256` (or the
+platform's equivalent), then install it from VS Code. The GitHub Actions
+`Extension packages` workflow builds the Linux x64, macOS arm64, macOS x64, and
+Windows x64 artifacts on native runners and uploads them as CI artifacts. It
+does not publish to the Marketplace or create a GitHub Release.
+
+## Limitations and troubleshooting
+
+Native builds require a matching target runner and the Python/uv build toolchain;
+users of packaged VSIX files need only VS Code. An unavailable platform/CPU has
+no bundled fallback and requires a matching artifact. A startup failure should
+include the process error in the Output channel; use Runtime Diagnostics to
+check the resolved path and binary health. Antivirus quarantine or a damaged
+download can also prevent the executable from starting; verify its checksum
+and reinstall the VSIX. Automatic Marketplace publishing is not part of this
+phase.
 
 The extension uses VS Code's primary workspace folder per in-memory agent
 session. Changing folders invalidates the session. Profiles are listed from the existing Python
@@ -101,6 +170,6 @@ filesystem, environment, network, subprocess, or secret access.
    terminated.
 
 Current MVP limitations: only OpenAI-compatible chat-completions endpoints,
-no bundled runtime, persistent conversations, multi-root sessions,
+persistent conversations, multi-root sessions,
 multiple concurrent chats, Marketplace publishing, or native
 Anthropic/Gemini adapters.
