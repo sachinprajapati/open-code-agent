@@ -32,6 +32,7 @@ def protocol_manifest() -> dict[str, object]:
             "streaming_events",
             "bidirectional_approvals",
             "cancellation",
+            "mcp",
         ],
     }
 

@@ -26,7 +26,7 @@ class FakeChild extends EventEmitter {
     super();
     this.stdin.on("data", (chunk: Buffer) => {
       const request = JSON.parse(chunk.toString()) as { id?: string; method?: string };
-      if (request.method === "initialize") this.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { selected_protocol_version: "1.0", capabilities: { profiles: true, sessions: true, streaming_events: true, bidirectional_approvals: true, cancellation: true }, server_name: "test", server_version: "1" } })}\n`);
+      if (request.method === "initialize") this.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { selected_protocol_version: "1.0", capabilities: { profiles: true, sessions: true, streaming_events: true, bidirectional_approvals: true, cancellation: true, mcp: true }, server_name: "test", server_version: "1" } })}\n`);
     });
   }
   kill(signal: NodeJS.Signals = "SIGTERM"): boolean {

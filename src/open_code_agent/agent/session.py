@@ -1,11 +1,13 @@
 """One composition point for bounded CLI coding-agent sessions."""
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
 from open_code_agent.agent.limits import AgentLimits
 from open_code_agent.agent.runner import AgentRunner
 from open_code_agent.execution import ApprovalHandler, CommandExecutionPolicy
+from open_code_agent.mcp import ManagedMCPServer, register_mcp_server
 from open_code_agent.providers import (
     EnvironmentSecretResolver,
     OpenAICompatibleProfile,
@@ -45,9 +47,12 @@ class AgentSession:
     provider: OpenAICompatibleProvider | OpenAIResponsesProvider
     tools: ToolRegistry
     limits: AgentLimits
+    mcp_servers: tuple[ManagedMCPServer, ...] = ()
 
     async def aclose(self) -> None:
         """Release provider-owned HTTP resources."""
+        for server in self.mcp_servers:
+            await server.close()
         await self.provider.aclose()
 
     async def __aenter__(self) -> "AgentSession":
@@ -68,6 +73,7 @@ def build_agent_session(
     command_approvals: ApprovalHandler | None = None,
     patch_approvals: PatchApprovalHandler | None = None,
     limits: AgentLimits | None = None,
+    mcp_servers: Sequence[ManagedMCPServer] = (),
 ) -> AgentSession:
     """Build an isolated session without mutating profile configuration.
 
@@ -102,4 +108,16 @@ def build_agent_session(
         provider=provider,
         tools=tools,
         limits=effective_limits,
+        mcp_servers=tuple(mcp_servers),
     )
+
+
+async def attach_mcp_servers(session: AgentSession) -> None:
+    """Attach already user-enabled MCP servers after session construction.
+
+    This explicit asynchronous step ensures a configuration record alone can
+    never launch code. Callers invoke it only after an editor-initiated
+    connect/enable action and can surface any safe startup failure.
+    """
+    for server in session.mcp_servers:
+        await register_mcp_server(server, session.tools)

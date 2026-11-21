@@ -76,7 +76,31 @@ For persistent local diagnostics, the extension also writes lifecycle and RPC
 metadata (never prompt text or secrets) to
 `.open-code-agent/extension.log` in the primary workspace folder.
 
+## Manual MCP acceptance
+
+Use the local development fixture at `examples/mcp/demo_server.py` to test the
+full MCP path through an Extension Development Host. In the **MCP Servers** UI,
+add a server with Command `uv`, Arguments `run python examples/mcp/demo_server.py`,
+Working directory set to the repository root, and no environment variables.
+
+The fixture is deliberately harmless: it exposes exactly `echo(message)`,
+`add_numbers(left, right)`, and `server_info()`. It does not provide shell,
+filesystem, environment, network, subprocess, or secret access.
+
+1. Connect the configured server and confirm it appears as **Connected**.
+2. Confirm exactly three tools are discovered: `echo`, `add_numbers`, and
+   `server_info`.
+3. Ask the agent to use one of those tools and confirm it proposes a tool call.
+4. Confirm the approval card identifies the server, tool, and arguments.
+5. Reject the proposal and confirm the tool does not run.
+6. Repeat the proposal, approve it once, and confirm the returned result is
+   displayed (for example, `echo: hello` for `echo("hello")`).
+7. Disable or delete the server, then confirm the agent cannot make further
+   calls to its tools.
+8. Close the Extension Development Host and confirm its demo server process is
+   terminated.
+
 Current MVP limitations: only OpenAI-compatible chat-completions endpoints,
 no bundled runtime, persistent conversations, multi-root sessions,
-multiple concurrent chats, Marketplace publishing, MCP, or native
+multiple concurrent chats, Marketplace publishing, or native
 Anthropic/Gemini adapters.

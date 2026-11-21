@@ -33,6 +33,7 @@ Repository = "https://github.com/open-code-agent/open-code-agent"
 
 [dependency-groups]
 dev = [
+  "mcp>=1.6,<2",
   "mypy>=1.14",
   "pre-commit>=4.0",
   "pytest>=8.3",

@@ -4,12 +4,17 @@
     "sessions",
     "streaming_events",
     "bidirectional_approvals",
-    "cancellation"
+    "cancellation",
+    "mcp"
   ],
   "methods": [
     {
       "direction": "client_to_server",
       "name": "initialize"
+    },
+    {
+      "direction": "client_to_server",
+      "name": "mcp/test"
     },
     {
       "direction": "client_to_server",
@@ -78,10 +83,6 @@
     {
       "direction": "server_to_client",
       "name": "approval/request"
-    },
-    {
-      "direction": "server_to_client",
-      "name": "secret/resolve"
     }
   ],
   "notifications": [

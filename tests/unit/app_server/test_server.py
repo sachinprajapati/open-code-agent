@@ -96,3 +96,55 @@ async def test_session_lifecycle_is_in_memory(tmp_path: Path) -> None:
     assert status["history_message_count"] == 0
     assert cleared["turn_count"] == 0
     assert closed["closed"] is True
+
+
+async def test_session_attaches_explicit_connected_mcp_tools(tmp_path: Path) -> None:
+    store = ProviderProfileStore(tmp_path / "profiles.json")
+    store.add(
+        OpenAICompatibleProfile(
+            profile_id="local",
+            display_name="Local",
+            base_url="http://localhost:1234/v1",
+            default_model="test-model",
+        )
+    )
+    server, _ = server_for(store)
+    await server._dispatch(  # noqa: SLF001
+        "initialize",
+        {
+            "client_name": "test",
+            "client_version": "1",
+            "supported_protocol_versions": ["1.0"],
+        },
+    )
+
+    created = await server._dispatch(  # noqa: SLF001
+        "session/create",
+        {
+            "profile_id": "local",
+            "workspace_path": str(tmp_path),
+            "mode": "plan",
+            "mcp_servers": [
+                {
+                    "server_id": "local-demo",
+                    "display_name": "OpenCodeAgent local demo",
+                    "command": "uv",
+                    "arguments": ["run", "python", "examples/mcp/demo_server.py"],
+                    "working_directory": str(Path(__file__).parents[3]),
+                    "enabled": True,
+                }
+            ],
+        },
+    )
+
+    assert created["available_tools"] == [
+        "list_files",
+        "mcp.local-demo.add_numbers",
+        "mcp.local-demo.echo",
+        "mcp.local-demo.server_info",
+        "read_file",
+        "search_code",
+    ]
+    await server._dispatch(  # noqa: SLF001
+        "session/close", {"session_id": created["session_id"]}
+    )

@@ -32,7 +32,7 @@ Anthropic, Gemini, Ollama, and compatible provider adapters.
 Not yet implemented: unrestricted shell or terminal access, automatic command
 approval, container sandboxing, Git mutation, conversation persistence,
 provider-management UI, bundled Python runtime, VS Code SecretStorage integration,
-multiple simultaneous sidebar sessions, Marketplace publishing, MCP, native
+multiple simultaneous sidebar sessions, Marketplace publishing, native
 Anthropic/Gemini adapters, and secure desktop keyring. Workspace inspection remains policy-bound;
 see [workspace tools](docs/workspace-tools.md) and [command execution](docs/command-execution.md).
 
@@ -123,6 +123,22 @@ npm run compile
 
 See [VS Code extension development](docs/vscode-extension.md) for setup,
 settings, workspace behavior, approvals, logging, and troubleshooting.
+
+## Local demo MCP server
+
+For development-only manual MCP acceptance testing, the repository includes a
+harmless stdio server at `examples/mcp/demo_server.py`. In the VS Code
+**MCP Servers** UI, add a server with:
+
+- Command: `uv`
+- Arguments: `run python examples/mcp/demo_server.py`
+- Working directory: repository root
+- Environment variables: none
+
+It exposes only `echo`, `add_numbers`, and `server_info`; it has no shell,
+filesystem, environment, network, subprocess, or secret access. See the
+[manual acceptance procedure](docs/vscode-extension.md#manual-mcp-acceptance)
+before testing it through the extension.
 
 ## Security warning
 

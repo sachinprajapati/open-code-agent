@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
+import json
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, cast
@@ -16,6 +18,7 @@ from open_code_agent.agent import (
     AgentMode,
     AgentRunRequest,
     AgentSession,
+    attach_mcp_servers,
     build_agent_session,
 )
 from open_code_agent.agent.events import RunCompleted
@@ -58,6 +61,7 @@ from open_code_agent.app_server.sessions import (
 )
 from open_code_agent.app_server.transport import AsyncLineTransport, TransportError
 from open_code_agent.execution import CommandExecutionPolicy
+from open_code_agent.mcp import MCPServerConfig, ManagedMCPServer
 from open_code_agent.persistence import ProfileNotFoundError, ProviderProfileStore
 from open_code_agent.providers import (
     EnvironmentSecretResolver,
@@ -84,6 +88,7 @@ _STATEFUL_METHODS = frozenset(
         "profiles/set-default",
         "profiles/test",
         "models/list",
+        "mcp/test",
         "session/create",
         "session/status",
         "session/clear",
@@ -209,6 +214,7 @@ class AppServer:
             "profiles/set-default": self._profiles_set_default,
             "profiles/test": self._profiles_test,
             "models/list": self._models_list,
+            "mcp/test": self._mcp_test,
             "session/create": self._session_create,
             "session/status": self._session_status,
             "session/clear": self._session_clear,
@@ -255,7 +261,7 @@ class AppServer:
                 "bidirectional_approvals": True,
                 "cancellation": True,
                 "conversation_persistence": False,
-                "mcp": False,
+                "mcp": True,
                 "pty": False,
             },
             "limits": self._limits.model_dump(mode="json"),
@@ -389,6 +395,80 @@ class AppServer:
             ]
         }
 
+    def _mcp_config(self, value: object) -> MCPServerConfig:
+        if not isinstance(value, dict):
+            raise AppServerError(INVALID_PARAMS, "MCP server must be an object.")
+        try:
+            return MCPServerConfig.model_validate(value)
+        except ValidationError as error:
+            raise AppServerError(INVALID_PARAMS, "MCP server is invalid.") from error
+
+    def _mcp_servers(
+        self, params: dict[str, Any], context: dict[str, str]
+    ) -> tuple[ManagedMCPServer, ...]:
+        raw_servers = params.get("mcp_servers", [])
+        if not isinstance(raw_servers, list) or len(raw_servers) > 16:
+            raise AppServerError(INVALID_PARAMS, "MCP server list is invalid.")
+        seen: set[str] = set()
+        servers: list[ManagedMCPServer] = []
+        for raw in raw_servers:
+            config = self._mcp_config(raw)
+            if not config.enabled:
+                continue
+            if config.server_id in seen:
+                raise AppServerError(INVALID_PARAMS, "MCP server IDs must be unique.")
+            seen.add(config.server_id)
+            servers.append(
+                ManagedMCPServer(
+                    config,
+                    self._secret_resolver.resolve,
+                    approval_handler=self._mcp_approval_handler(context),
+                )
+            )
+        return tuple(servers)
+
+    async def _mcp_test(self, params: dict[str, Any]) -> dict[str, Any]:
+        server = ManagedMCPServer(
+            self._mcp_config(params.get("server")), self._secret_resolver.resolve
+        )
+        try:
+            tools = await server.connect()
+            return {"tools": [tool.name for tool in tools]}
+        finally:
+            await server.close()
+
+    def _mcp_approval_handler(
+        self, context: dict[str, str]
+    ) -> Callable[[MCPServerConfig, str, dict[str, Any], Any], Awaitable[bool]]:
+        async def request(
+            config: MCPServerConfig, tool_name: str, arguments: dict[str, Any], _: Any
+        ) -> bool:
+            payload = {
+                "server_id": config.server_id,
+                "server_name": config.display_name,
+                "tool_name": tool_name,
+                "arguments": arguments,
+            }
+            fingerprint = hashlib.sha256(
+                json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
+            result = await self._approval_request(
+                {
+                    "session_id": context["session_id"],
+                    "run_id": context["run_id"],
+                    "proposal_type": "mcp",
+                    "fingerprint": fingerprint,
+                    "proposal": payload,
+                }
+            )
+            return bool(
+                result is not None
+                and result.get("fingerprint") == fingerprint
+                and result.get("decision") == "approved_once"
+            )
+
+        return request
+
     async def _session_create(self, params: dict[str, Any]) -> dict[str, Any]:
         profile = self._profile_param(params, optional=True)
         workspace_path = params.get("workspace_path", params.get("workspace"))
@@ -424,6 +504,7 @@ class AppServer:
             self._approval_request, lambda: (context["session_id"], context["run_id"])
         )
         try:
+            mcp_servers = self._mcp_servers(params, context)
             session = self._session_builder(
                 profile=profile,
                 workspace=workspace,
@@ -434,10 +515,16 @@ class AppServer:
                 command_approvals=approvals,
                 patch_approvals=approvals,
                 secret_resolver=self._secret_resolver,
+                mcp_servers=mcp_servers,
             )
+            await attach_mcp_servers(session)
             record = await self._sessions.add(session)
         except RuntimeError as error:
             raise AppServerError(RESOURCE_LIMIT, "Session limit reached.") from error
+        except Exception as error:
+            if "session" in locals():
+                await session.aclose()
+            raise AppServerError(INVALID_PARAMS, "MCP server could not be connected.") from error
         # The closure is per-session and only one run can be active for it.
         record.approval_context = context
         return self._session_summary(record, detail=True)
@@ -574,7 +661,13 @@ class AppServer:
                     task=text,
                     system_prompt=None
                     if record.history
-                    else coding_agent_system_prompt(record.session.mode),
+                    else coding_agent_system_prompt(
+                        record.session.mode,
+                        has_mcp_tools=any(
+                            tool.name.startswith("mcp.")
+                            for tool in record.session.tools.list_tools()
+                        ),
+                    ),
                     limits=record.session.limits,
                 )
                 async for event in record.session.runner.stream(request):

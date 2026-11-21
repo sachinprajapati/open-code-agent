@@ -16,6 +16,7 @@ export class SessionController implements vscode.Disposable {
   // chunk. Buffer events that arrive before turn/start's response supplies the
   // run ID, otherwise the sequence guard would discard the whole run.
   private pendingRunEvents: AgentEvent[] = [];
+  private mcpServers: JsonObject[] = [];
   private approvalController: ApprovalController | undefined;
   private readonly emitter = new vscode.EventEmitter<SessionState>();
   readonly onDidChange = this.emitter.event;
@@ -25,6 +26,7 @@ export class SessionController implements vscode.Disposable {
     vscode.workspace.onDidChangeWorkspaceFolders(() => { void this.closeForWorkspaceChange(); });
   }
   setApprovals(controller: ApprovalController): void { this.approvalController = controller; }
+  async setMcpServers(servers: JsonObject[]): Promise<void> { this.requireIdle(); this.mcpServers = structuredClone(servers); await this.closeSession(); this.publish(); }
   snapshot(): SessionState { return structuredClone(this.state); }
   async refreshProfiles(): Promise<void> {
     const result = await this.runtime.request("profiles/list"); if (!isObject(result) || !Array.isArray(result.profiles)) throw new Error("Invalid profiles response.");
@@ -55,7 +57,7 @@ export class SessionController implements vscode.Disposable {
   private async ensureSession(): Promise<void> {
     if (this.state.sessionId) return; this.trace("Selecting workspace for agent session."); this.workspace = await this.pickWorkspace(); if (!this.workspace) throw new Error("Open a workspace folder before starting an agent session."); if (!this.state.profile) throw new Error("Configure a provider profile with the OpenCodeAgent CLI first.");
     setProgress(this.state, "Creating agent session..."); this.publish(); this.trace(`Creating session for ${this.workspace.uri.fsPath}.`);
-    const result = await this.runtime.request("session/create", { profile_id: this.state.profile, ...(this.state.model ? { model: this.state.model } : {}), mode: this.state.mode === "auto-edit" ? "auto_edit" : this.state.mode, workspace_path: this.workspace.uri.fsPath });
+    const result = await this.runtime.request("session/create", { profile_id: this.state.profile, ...(this.state.model ? { model: this.state.model } : {}), mode: this.state.mode === "auto-edit" ? "auto_edit" : this.state.mode, workspace_path: this.workspace.uri.fsPath, mcp_servers: this.mcpServers });
     if (!isObject(result) || typeof result.session_id !== "string") throw new Error("Invalid session response."); this.state.sessionId = result.session_id; this.state.workspaceName = this.workspace.name; this.trace(`Session created for workspace ${this.workspace.name} (${result.session_id}).`);
   }
   private async pickWorkspace(): Promise<vscode.WorkspaceFolder | undefined> {
