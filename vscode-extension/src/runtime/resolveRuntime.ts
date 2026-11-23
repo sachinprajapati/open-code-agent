@@ -29,6 +29,24 @@ export function containedPath(extensionPath: string, candidate: string): string 
 
 export function resolveRuntime(context: vscode.ExtensionContext, config: ServerConfiguration): RuntimeResolution {
   if (context.extensionMode === vscode.ExtensionMode.Development) {
+    // Extension Development Host normally inherits an arbitrary VS Code PATH.
+    // Running the bare default executable therefore can silently select an old
+    // globally installed agent rather than the checkout being developed.
+    // Keep an explicitly configured launch untouched, but make the defaults
+    // reliably execute this repository through its uv project.
+    if (
+      config.executable === "open-code-agent"
+      && config.arguments.length === 1
+      && config.arguments[0] === "app-server"
+    ) {
+      const projectRoot = resolve(context.extensionPath, "..");
+      return {
+        mode: "development",
+        executable: "uv",
+        arguments: ["run", "--project", projectRoot, "open-code-agent", "app-server"],
+        cwd: projectRoot,
+      };
+    }
     return { mode: "development", executable: config.executable, arguments: config.arguments, cwd: config.cwd };
   }
   const target = targetFor();

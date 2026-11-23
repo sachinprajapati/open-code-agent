@@ -2,9 +2,9 @@
 
 import asyncio
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Protocol, cast, runtime_checkable
 
-from open_code_agent.protocol import JSONObject
+from open_code_agent.protocol import JSONObject, JSONValue
 from open_code_agent.tools.base import (
     ToolExecutionContext,
     ToolExecutionResult,
@@ -71,6 +71,7 @@ class ProposePatchTool:
         content: JSONObject = {
             "proposal_id": proposal.proposal_id,
             "affected_paths": list(proposal.affected_paths),
+            "changes": cast(JSONValue, list(proposal.diff_metadata)),
             "status": proposal.status.value,
         }
         if self._approvals is None:

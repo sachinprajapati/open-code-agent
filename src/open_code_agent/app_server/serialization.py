@@ -122,8 +122,11 @@ def event_payload(event: object, maximum: int) -> tuple[str, JSONObject] | None:
             "tool_calls": event.result.total_tool_calls,
         }
     if isinstance(event, RunFailed):
+        message = _bounded_text(event.error.message, maximum)["text"]
         return "run_failed", {
-            "message": "Agent run failed.",
+            "message": message if isinstance(message, str) else "Agent run failed.",
+            "category": event.error.category.value,
+            "retryable": event.error.retryable,
             "model_steps": event.result.model_steps,
         }
     if isinstance(event, RunLimitReached):

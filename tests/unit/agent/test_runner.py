@@ -178,6 +178,25 @@ async def test_model_error_limit_and_cancellation_are_terminally_safe() -> None:
     )
     assert failed.status is AgentRunStatus.FAILED
 
+    initial_error = await collect_agent_run(
+        AgentRunner(
+            MockModelProvider(
+                events=[
+                    StreamError(
+                        error=ModelError(
+                            category=ModelErrorCategory.AUTHENTICATION,
+                            message="Provider API key is unavailable.",
+                        )
+                    )
+                ]
+            )
+        ),
+        AgentRunRequest(model="mock", task="x"),
+    )
+    assert initial_error.status is AgentRunStatus.FAILED
+    assert initial_error.error is not None
+    assert initial_error.error.message == "Provider API key is unavailable."
+
     looping = MockModelProvider(
         events=[
             StreamStarted(),

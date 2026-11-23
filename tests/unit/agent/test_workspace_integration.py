@@ -3,9 +3,11 @@
 from pathlib import Path
 
 from open_code_agent.agent import (
+    AgentMode,
     AgentRunner,
     AgentRunRequest,
     AgentRunStatus,
+    build_agent_session,
     collect_agent_run,
 )
 from open_code_agent.protocol import (
@@ -18,7 +20,11 @@ from open_code_agent.protocol import (
     ToolCallCompleted,
     ToolCallStarted,
 )
-from open_code_agent.providers import MockModelProvider
+from open_code_agent.providers import (
+    MockModelProvider,
+    OpenAICompatibleProfile,
+    OpenAIResponsesProvider,
+)
 from open_code_agent.tools import ListFilesTool, ReadFileTool, ToolRegistry
 from open_code_agent.workspace import WorkspaceContext
 
@@ -69,6 +75,22 @@ async def test_agent_inspection_flow_uses_only_bound_workspace(tmp_path: Path) -
         "tool",
     ]
     assert "safe repository text" in str(provider.received_requests[2])
+
+
+async def test_session_uses_responses_for_official_gpt6_profile(tmp_path: Path) -> None:
+    session = build_agent_session(
+        profile=OpenAICompatibleProfile(
+            profile_id="openai",
+            display_name="OpenAI",
+            base_url="https://api.openai.com/v1",
+            default_model="gpt-6-luna",
+        ),
+        workspace=WorkspaceContext(root=tmp_path),
+        mode=AgentMode.PLAN,
+    )
+
+    assert isinstance(session.provider, OpenAIResponsesProvider)
+    await session.aclose()
 
 
 async def test_agent_sensitive_path_attempt_never_returns_secret(

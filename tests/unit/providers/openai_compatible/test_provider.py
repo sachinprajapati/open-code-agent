@@ -24,6 +24,8 @@ from open_code_agent.providers import (
     ModelProviderRegistry,
     OpenAICompatibleProfile,
     OpenAICompatibleProvider,
+    OpenAIResponsesProvider,
+    provider_for_profile,
 )
 from open_code_agent.providers.exceptions import ProviderError
 
@@ -141,6 +143,34 @@ async def test_streaming_normalizes_status_errors_and_redacts_secret() -> None:
     assert events[0].error.retry_after_seconds == 2
     assert "secret-value" not in events[0].error.message
     assert "\n" not in events[0].error.message
+    await provider.aclose()
+
+
+@pytest.mark.asyncio
+async def test_streaming_reports_unavailable_secret_as_safe_model_error() -> None:
+    provider = OpenAICompatibleProvider(
+        profile(api_key_secret_ref="vscode:missing-key"),
+        secret_resolver=MappingSecretResolver({}),
+        transport=httpx.MockTransport(lambda _: httpx.Response(200)),
+    )
+
+    events = await collect(provider.stream(request()))
+
+    assert len(events) == 1
+    assert isinstance(events[0], StreamError)
+    assert events[0].error.category is ModelErrorCategory.AUTHENTICATION
+    assert events[0].error.message == (
+        "Secret reference 'vscode:missing-key' is unavailable."
+    )
+    await provider.aclose()
+
+
+async def test_official_gpt6_profile_uses_responses_for_native_tools() -> None:
+    provider = provider_for_profile(
+        profile(base_url="https://api.openai.com/v1", default_model="gpt-6-luna")
+    )
+
+    assert isinstance(provider, OpenAIResponsesProvider)
     await provider.aclose()
 
 

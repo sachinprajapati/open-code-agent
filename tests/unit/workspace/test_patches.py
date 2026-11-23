@@ -14,6 +14,13 @@ from open_code_agent.workspace import (
 )
 
 
+def add_diff(path: str, content: str) -> str:
+    lines = content.splitlines(keepends=True)
+    return f"--- /dev/null\n+++ b/{path}\n@@ -0,0 +1,{len(lines)} @@\n" + "".join(
+        f"+{line}" for line in lines
+    )
+
+
 def diff(path: str, before: str, after: str) -> str:
     """Build a minimal valid one-line unified diff fixture."""
     return f"--- a/{path}\n+++ b/{path}\n@@ -1 +1 @@\n-{before}\n+{after}\n"
@@ -88,3 +95,54 @@ def test_malformed_patch_and_symlink_target_are_rejected(tmp_path: Path) -> None
     with pytest.raises(WorkspaceError):
         store.propose(diff("link.txt", "outside", "changed"))
     assert outside.read_text() == "outside\n"
+
+
+def test_new_text_file_is_previewed_then_created_only_after_approval(
+    tmp_path: Path,
+) -> None:
+    store = PatchProposalStore(WorkspaceContext(root=tmp_path))
+    proposal = store.propose(
+        add_diff("checkpoint-test.txt", "Phase 15 checkpoint test\n")
+    )
+
+    assert proposal.diff_metadata == (
+        {
+            "path": "checkpoint-test.txt",
+            "status": "added",
+            "content": "Phase 15 checkpoint test\n",
+        },
+    )
+    assert not (tmp_path / "checkpoint-test.txt").exists()
+    with pytest.raises(ProposalApprovalError):
+        store.apply_approved(proposal.proposal_id)
+
+    store.approve(proposal.proposal_id)
+    assert store.apply_approved(proposal.proposal_id).complete
+    assert (
+        tmp_path / "checkpoint-test.txt"
+    ).read_text() == "Phase 15 checkpoint test\n"
+
+
+def test_new_file_patch_records_a_checkpoint_only_after_application(
+    tmp_path: Path,
+) -> None:
+    recorded: list[str] = []
+
+    class Recorder:
+        def record(self, proposal: object) -> None:
+            recorded.append(str(proposal))
+
+    store = PatchProposalStore(WorkspaceContext(root=tmp_path), Recorder())
+    proposal = store.propose(add_diff("created.txt", "created\n"))
+    assert recorded == []
+    store.approve(proposal.proposal_id)
+    store.apply_approved(proposal.proposal_id)
+    assert len(recorded) == 1
+
+
+@pytest.mark.parametrize("path", ["../escape.txt", ".env", "existing.txt"])
+def test_new_file_rejects_unsafe_or_existing_targets(tmp_path: Path, path: str) -> None:
+    (tmp_path / "existing.txt").write_text("present\n")
+    store = PatchProposalStore(WorkspaceContext(root=tmp_path))
+    with pytest.raises(WorkspaceError):
+        store.propose(add_diff(path, "new\n"))

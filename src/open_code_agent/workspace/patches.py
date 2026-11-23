@@ -7,6 +7,7 @@ import tempfile
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
+from typing import Protocol
 from uuid import uuid4
 
 from open_code_agent.workspace.context import WorkspaceContext
@@ -39,12 +40,17 @@ class ProposalStatus(StrEnum):
 
 @dataclass(frozen=True)
 class PatchFileChange:
-    """One fully prepared existing-file replacement within a proposal."""
+    """One fully prepared replacement or new-file creation in a proposal."""
 
     path: PurePosixPath
-    original_hash: str
-    original_bytes: bytes
+    original_hash: str | None
+    original_bytes: bytes | None
     new_bytes: bytes
+
+    @property
+    def is_addition(self) -> bool:
+        """Whether this change creates a previously absent file."""
+        return self.original_bytes is None
 
 
 @dataclass(frozen=True)
@@ -61,6 +67,22 @@ class PatchProposal:
         """Return sorted portable paths without exposing host paths."""
         return tuple(change.path.as_posix() for change in self.changes)
 
+    @property
+    def diff_metadata(self) -> tuple[dict[str, str], ...]:
+        """Return UI-safe per-file diff metadata, including added-file contents."""
+        return tuple(
+            {
+                "path": change.path.as_posix(),
+                "status": "added" if change.is_addition else "modified",
+                **(
+                    {"content": _decode_patch_text(change.new_bytes)}
+                    if change.is_addition
+                    else {}
+                ),
+            }
+            for change in self.changes
+        )
+
 
 @dataclass(frozen=True)
 class PatchApplyResult:
@@ -72,6 +94,13 @@ class PatchApplyResult:
     error: str | None = None
 
 
+class PatchCheckpointRecorder(Protocol):
+    """Persist an applied patch's before/after states, if the host supports it."""
+
+    def record(self, proposal: PatchProposal) -> None:
+        """Record the already-applied proposal without modifying the workspace."""
+
+
 @dataclass(frozen=True)
 class _Hunk:
     old_start: int
@@ -79,6 +108,13 @@ class _Hunk:
     new_start: int
     new_count: int
     lines: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _ParsedChange:
+    path: PurePosixPath
+    hunks: tuple[_Hunk, ...]
+    is_addition: bool
 
 
 class PatchProposalStore:
@@ -89,8 +125,13 @@ class PatchProposalStore:
     invoke ``apply_approved`` after a human-controlled CLI approval.
     """
 
-    def __init__(self, workspace: WorkspaceContext) -> None:
+    def __init__(
+        self,
+        workspace: WorkspaceContext,
+        checkpoint_recorder: PatchCheckpointRecorder | None = None,
+    ) -> None:
         self._workspace = workspace
+        self._checkpoint_recorder = checkpoint_recorder
         self._proposals: dict[str, PatchProposal] = {}
 
     @property
@@ -110,24 +151,37 @@ class PatchProposalStore:
             diff, policy.max_patch_files, policy.max_patch_hunks
         )
         if (
-            sum(len(hunk.lines) for _, hunks in parsed for hunk in hunks)
+            sum(
+                len(hunk.lines)
+                for parsed_change in parsed
+                for hunk in parsed_change.hunks
+            )
             > policy.max_patch_lines
         ):
             raise InvalidPatchError("Patch proposal exceeds the configured line limit.")
         changes: list[PatchFileChange] = []
-        for relative, hunks in parsed:
-            path = self._eligible_file(relative)
-            original = _read_text_bytes(path, self._workspace)
-            new_text = _apply_hunks(_decode_patch_text(original), hunks)
-            new_bytes = _encode_like_original(new_text, original)
+        for parsed_change in parsed:
+            relative, hunks = parsed_change.path, parsed_change.hunks
+            if parsed_change.is_addition:
+                path = self._eligible_new_file(relative)
+                original = None
+                new_text = _apply_hunks("", hunks)
+                new_bytes = new_text.encode("utf-8")
+            else:
+                path = self._eligible_file(relative)
+                original = _read_text_bytes(path, self._workspace)
+                new_text = _apply_hunks(_decode_patch_text(original), hunks)
+                new_bytes = _encode_like_original(new_text, original)
             if len(new_bytes) > policy.max_file_size_bytes:
                 raise FileTooLargeError(
                     "Patched file would exceed the workspace limit."
                 )
+            if b"\x00" in new_bytes:
+                raise BinaryFileError("Binary workspace files cannot be patched.")
             changes.append(
                 PatchFileChange(
                     path=relative,
-                    original_hash=_hash(original),
+                    original_hash=_hash(original) if original is not None else None,
                     original_bytes=original,
                     new_bytes=new_bytes,
                 )
@@ -174,17 +228,23 @@ class PatchProposalStore:
             raise ProposalApprovalError("Patch proposal requires explicit approval.")
         prepared: list[tuple[PatchFileChange, Path]] = []
         for change in proposal.changes:
-            path = self._eligible_file(change.path)
-            current = _read_text_bytes(path, self._workspace)
-            if _hash(current) != change.original_hash:
-                raise StaleProposalError(
-                    "A proposed workspace file changed after preview."
-                )
+            if change.is_addition:
+                path = self._eligible_new_file(change.path)
+            else:
+                path = self._eligible_file(change.path)
+                current = _read_text_bytes(path, self._workspace)
+                if _hash(current) != change.original_hash:
+                    raise StaleProposalError(
+                        "A proposed workspace file changed after preview."
+                    )
             prepared.append((change, path))
         applied: list[str] = []
         try:
             for change, path in prepared:
-                _atomic_replace(path, change.new_bytes)
+                if change.is_addition:
+                    _atomic_create(path, change.new_bytes)
+                else:
+                    _atomic_replace(path, change.new_bytes)
                 applied.append(change.path.as_posix())
         except OSError:
             return PatchApplyResult(
@@ -200,6 +260,8 @@ class PatchProposalStore:
             status=ProposalStatus.APPLIED,
         )
         self._proposals[proposal_id] = applied_proposal
+        if self._checkpoint_recorder is not None:
+            self._checkpoint_recorder.record(applied_proposal)
         return PatchApplyResult(
             proposal_id=proposal_id,
             applied_paths=tuple(applied),
@@ -225,31 +287,58 @@ class PatchProposalStore:
         require_non_sensitive(self._workspace, path)
         return path
 
+    def _eligible_new_file(self, relative: PurePosixPath) -> Path:
+        """Validate an absent, ordinary text-file target without creating it."""
+        path = resolve_workspace_path(
+            self._workspace, relative.as_posix(), require_exists=False
+        )
+        if path.exists() or path.is_symlink():
+            raise WorkspacePathTypeError(
+                "New patch target already exists; use an explicit modification."
+            )
+        if not path.parent.is_dir():
+            raise WorkspacePathTypeError("New patch target parent must be a directory.")
+        if not policy_allows_path(self._workspace, path):
+            require_non_sensitive(self._workspace, path)
+            raise WorkspaceAccessDeniedError(
+                "Patch target is denied by workspace policy."
+            )
+        resolved_relative = relative_workspace_path(self._workspace, path)
+        if resolved_relative != relative:
+            raise WorkspaceAccessDeniedError(
+                "Patch target path is not stable in the workspace."
+            )
+        require_non_sensitive(self._workspace, path)
+        return path
+
 
 def _parse_unified_diff(
     diff: str, max_files: int, max_hunks: int
-) -> list[tuple[PurePosixPath, tuple[_Hunk, ...]]]:
+) -> list[_ParsedChange]:
     lines = diff.splitlines(keepends=True)
-    result: list[tuple[PurePosixPath, tuple[_Hunk, ...]]] = []
+    result: list[_ParsedChange] = []
     index = 0
     total_hunks = 0
     seen_paths: set[PurePosixPath] = set()
     while index < len(lines):
         if not lines[index].startswith("--- "):
             raise InvalidPatchError("Patch must use paired unified-diff file headers.")
-        old_path = _header_path(lines[index], "--- ")
+        old_path = _header_path(lines[index], "--- ", allow_dev_null=True)
         index += 1
         if index >= len(lines) or not lines[index].startswith("+++ "):
             raise InvalidPatchError("Patch is missing a new-file header.")
         new_path = _header_path(lines[index], "+++ ")
         index += 1
-        if old_path != new_path:
+        if new_path is None:
+            raise InvalidPatchError("Patch contains an invalid workspace path.")
+        is_addition = old_path is None
+        if old_path is not None and old_path != new_path:
             raise InvalidPatchError(
-                "Only modifications to existing files are supported."
+                "Patch file headers must name the same workspace file."
             )
-        if old_path in seen_paths:
+        if new_path in seen_paths:
             raise InvalidPatchError("Patch contains duplicate target paths.")
-        seen_paths.add(old_path)
+        seen_paths.add(new_path)
         hunks: list[_Hunk] = []
         while index < len(lines) and lines[index].startswith("@@ "):
             hunk, index = _parse_hunk(lines, index)
@@ -261,16 +350,20 @@ def _parse_unified_diff(
                 )
         if not hunks:
             raise InvalidPatchError("Each patch file requires at least one hunk.")
-        result.append((old_path, tuple(hunks)))
+        result.append(_ParsedChange(new_path, tuple(hunks), is_addition))
         if len(result) > max_files:
             raise InvalidPatchError("Patch proposal exceeds the configured file limit.")
     return result
 
 
-def _header_path(line: str, prefix: str) -> PurePosixPath:
+def _header_path(
+    line: str, prefix: str, *, allow_dev_null: bool = False
+) -> PurePosixPath | None:
     raw = line.removeprefix(prefix).rstrip("\r\n").split("\t", maxsplit=1)[0]
+    if raw == "/dev/null" and allow_dev_null:
+        return None
     if raw in {"", "/dev/null"}:
-        raise InvalidPatchError("Patch must modify existing workspace files only.")
+        raise InvalidPatchError("Patch contains an invalid workspace path.")
     if raw.startswith("a/") or raw.startswith("b/"):
         raw = raw[2:]
     try:
@@ -400,6 +493,34 @@ def _atomic_replace(path: Path, content: bytes) -> None:
             os.fsync(handle.fileno())
         os.chmod(temporary, stat.S_IMODE(path.stat().st_mode))
         os.replace(temporary, path)
+    except BaseException:
+        try:
+            temporary.unlink(missing_ok=True)
+        finally:
+            raise
+
+
+def _atomic_create(path: Path, content: bytes) -> None:
+    """Create an absent file atomically and never overwrite a raced-in target."""
+    descriptor, temporary_name = tempfile.mkstemp(prefix=".oca-patch-", dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.link(temporary, path)
+        except FileExistsError as error:
+            raise StaleProposalError(
+                "A proposed new workspace file was created after preview."
+            ) from error
+        os.unlink(temporary)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     except BaseException:
         try:
             temporary.unlink(missing_ok=True)

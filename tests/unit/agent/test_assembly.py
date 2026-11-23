@@ -100,3 +100,18 @@ def test_stream_error_is_a_failed_step_without_assistant_message() -> None:
     )
     assert result.error is not None
     assert result.assistant_message is None
+
+
+def test_initial_stream_error_is_a_failed_step_without_stream_started() -> None:
+    result = assemble(
+        StreamError(
+            error=ModelError(
+                category=ModelErrorCategory.AUTHENTICATION,
+                message="Provider API key is unavailable.",
+            )
+        )
+    )
+
+    assert result.error is not None
+    assert result.error.category is ModelErrorCategory.AUTHENTICATION
+    assert result.assistant_message is None

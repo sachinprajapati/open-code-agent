@@ -22,6 +22,7 @@ from open_code_agent.workspace.exceptions import (
 )
 from open_code_agent.workspace.patches import (
     PatchApplyResult,
+    PatchCheckpointRecorder,
     PatchProposal,
     PatchProposalStore,
 )
@@ -33,6 +34,7 @@ __all__ = [
     "InvalidTextEncodingError",
     "InvalidPatchError",
     "PatchApplyResult",
+    "PatchCheckpointRecorder",
     "PatchError",
     "PatchProposal",
     "PatchProposalStore",

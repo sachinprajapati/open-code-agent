@@ -16,7 +16,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   let resolution;
   try { resolution = resolveRuntime(context, configuration()); }
   catch (error) { const message = error instanceof Error ? error.message : "OpenCodeAgent runtime is unavailable."; void vscode.window.showErrorMessage(message); logger.error(message); resolution = { mode: "bundled" as const, executable: "", arguments: [] }; }
-  const runtime = new AppServerProcess(logger, () => ({ ...configuration(), executable: resolution.executable, arguments: resolution.arguments })); const sessions = new SessionController(runtime, logger, developmentWorkspace);
+  const runtime = new AppServerProcess(logger, () => ({ ...configuration(), executable: resolution.executable, arguments: resolution.arguments }), undefined, undefined, undefined, undefined, context.globalStorageUri.fsPath); const sessions = new SessionController(runtime, logger, developmentWorkspace);
   runtime.on("rpcReady", (rpc: JsonRpcClient) => rpc.registerRequestHandler("secret/resolve", async (params) => {
     const reference = params.secret_ref;
     if (typeof reference !== "string" || !/^vscode:[a-z0-9][a-z0-9_.-]*$/.test(reference)) return {} as Record<string, never>;

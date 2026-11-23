@@ -14,6 +14,7 @@ from open_code_agent.providers import (
     OpenAICompatibleProvider,
     OpenAIResponsesProvider,
     SecretResolver,
+    provider_for_profile,
 )
 from open_code_agent.tools import (
     ListFilesTool,
@@ -24,7 +25,11 @@ from open_code_agent.tools import (
     SearchCodeTool,
     ToolRegistry,
 )
-from open_code_agent.workspace import PatchProposalStore, WorkspaceContext
+from open_code_agent.workspace import (
+    PatchCheckpointRecorder,
+    PatchProposalStore,
+    WorkspaceContext,
+)
 
 
 class AgentMode(StrEnum):
@@ -72,6 +77,7 @@ def build_agent_session(
     command_policy: CommandExecutionPolicy | None = None,
     command_approvals: ApprovalHandler | None = None,
     patch_approvals: PatchApprovalHandler | None = None,
+    patch_checkpoint_recorder: PatchCheckpointRecorder | None = None,
     limits: AgentLimits | None = None,
     mcp_servers: Sequence[ManagedMCPServer] = (),
 ) -> AgentSession:
@@ -85,19 +91,18 @@ def build_agent_session(
     tools.register(ReadFileTool(workspace))
     tools.register(SearchCodeTool(workspace))
     if mode is not AgentMode.PLAN:
-        tools.register(ProposePatchTool(PatchProposalStore(workspace), patch_approvals))
+        tools.register(
+            ProposePatchTool(
+                PatchProposalStore(workspace, patch_checkpoint_recorder),
+                patch_approvals,
+            )
+        )
         if command_policy is not None and command_approvals is not None:
             tools.register(RunCommandTool(workspace, command_policy, command_approvals))
-    provider: OpenAICompatibleProvider | OpenAIResponsesProvider
     profile_copy = profile.model_copy(deep=True)
-    if profile_copy.api == "responses":
-        provider = OpenAIResponsesProvider(
-            profile_copy, secret_resolver=secret_resolver or EnvironmentSecretResolver()
-        )
-    else:
-        provider = OpenAICompatibleProvider(
-            profile_copy, secret_resolver=secret_resolver or EnvironmentSecretResolver()
-        )
+    provider = provider_for_profile(
+        profile_copy, secret_resolver=secret_resolver or EnvironmentSecretResolver()
+    )
     effective_limits = (limits or AgentLimits()).model_copy(deep=True)
     return AgentSession(
         profile=profile.model_copy(deep=True),

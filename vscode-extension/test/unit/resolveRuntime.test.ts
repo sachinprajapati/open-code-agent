@@ -11,6 +11,16 @@ function temp(): string { const path = mkdtempSync(join(tmpdir(), "oca-runtime-t
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
 describe("runtime resolution", () => {
+  it("runs the checkout through uv for the default development launch", () => {
+    const context = { extensionMode: 1, extensionPath: "/repo/vscode-extension" } as never;
+    const config = { executable: "open-code-agent", arguments: ["app-server"] } as never;
+    expect(resolveRuntime(context, config)).toMatchObject({
+      mode: "development",
+      executable: "uv",
+      arguments: ["run", "--project", "/repo", "open-code-agent", "app-server"],
+      cwd: "/repo",
+    });
+  });
   it("preserves configured Python/uv launch in development mode", () => {
     const context = { extensionMode: 1 } as never;
     const config = { executable: "uv", arguments: ["run", "open-code-agent", "app-server"], cwd: "/repo" } as never;

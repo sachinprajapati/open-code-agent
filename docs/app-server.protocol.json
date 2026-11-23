@@ -54,6 +54,42 @@
     },
     {
       "direction": "client_to_server",
+      "name": "task/clear"
+    },
+    {
+      "direction": "client_to_server",
+      "name": "task/checkpoint/preview"
+    },
+    {
+      "direction": "client_to_server",
+      "name": "task/checkpoint/restore"
+    },
+    {
+      "direction": "client_to_server",
+      "name": "task/create"
+    },
+    {
+      "direction": "client_to_server",
+      "name": "task/delete"
+    },
+    {
+      "direction": "client_to_server",
+      "name": "task/get"
+    },
+    {
+      "direction": "client_to_server",
+      "name": "task/list"
+    },
+    {
+      "direction": "client_to_server",
+      "name": "task/rename"
+    },
+    {
+      "direction": "client_to_server",
+      "name": "task/resume"
+    },
+    {
+      "direction": "client_to_server",
       "name": "session/close"
     },
     {

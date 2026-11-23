@@ -32,6 +32,7 @@ export class AppServerProcess extends EventEmitter {
       try { process.kill(-pid, 0); return true; }
       catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
     },
+    private readonly dataDirectory?: string,
   ) { super(); }
   get runtimeState(): RuntimeState { return this.state; }
   async start(): Promise<void> {
@@ -97,7 +98,7 @@ export class AppServerProcess extends EventEmitter {
         });
       });
       this.emit("rpcReady", rpc);
-      const initialized = await rpc.request("initialize", { client_name: "OpenCodeAgent VS Code", client_version: "0.1.0", supported_protocol_versions: [PROTOCOL_VERSION], client_capabilities: { approvals: true, streaming_events: true, cancellation: true } }, config.startupTimeoutMs) as unknown as InitializeResult;
+      const initialized = await rpc.request("initialize", { client_name: "OpenCodeAgent VS Code", client_version: "0.1.0", supported_protocol_versions: [PROTOCOL_VERSION], client_capabilities: { approvals: true, streaming_events: true, cancellation: true }, ...(this.dataDirectory ? { data_directory: this.dataDirectory } : {}) }, config.startupTimeoutMs) as unknown as InitializeResult;
       if (initialized.selected_protocol_version !== PROTOCOL_VERSION) throw new ProtocolError("The app server selected an incompatible protocol version.");
       for (const capability of Object.keys(REQUIRED_CAPABILITIES)) if (!initialized.capabilities?.[capability]) throw new ProtocolError(`The app server lacks required capability: ${capability}`);
       this.capabilities = initialized.capabilities; await rpc.notify("initialized"); this.logger.info(`Ready: ${initialized.server_name} ${initialized.server_version}, protocol ${initialized.selected_protocol_version}.`); this.transition("ready");

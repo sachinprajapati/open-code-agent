@@ -71,6 +71,14 @@ class AssistantResponseAssembler:
             raise AgentAssemblyError(
                 "Received a model event after stream terminal event."
             )
+        # A provider can fail before it receives any response bytes (for
+        # example, while resolving credentials or after an HTTP status error).
+        # Such a normalized error is terminal and does not require the usual
+        # stream_started preamble.
+        if isinstance(event, StreamError):
+            self._error = event.error.model_copy(deep=True)
+            self._terminal = True
+            return
         if isinstance(event, StreamStarted):
             if self._started:
                 raise AgentAssemblyError("Received duplicate stream_started event.")
@@ -119,18 +127,15 @@ class AssistantResponseAssembler:
                 )
             self._finish_reason = event.finish_reason
             self._terminal = True
-        elif isinstance(event, StreamError):
-            self._error = event.error.model_copy(deep=True)
-            self._terminal = True
 
     def result(self) -> AgentStepResult:
         """Return a structured result after exactly one terminal event."""
-        if not self._started:
-            raise AgentAssemblyError("Model stream did not include stream_started.")
         if not self._terminal:
             raise AgentAssemblyError("Model stream ended without a terminal event.")
         if self._error is not None:
             return AgentStepResult(error=self._error, usage=self._usage)
+        if not self._started:
+            raise AgentAssemblyError("Model stream did not include stream_started.")
         content: list[MessageContentPart] = []
         calls: list[ToolCall] = []
         for kind, value in self._order:

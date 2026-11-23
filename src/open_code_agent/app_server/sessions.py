@@ -37,6 +37,7 @@ class SessionRecord:
     updated_at: str = field(default_factory=now)
     active: ActiveRun | None = None
     approval_context: dict[str, str] = field(default_factory=dict)
+    task_id: str | None = None
 
 
 class SessionRegistry:

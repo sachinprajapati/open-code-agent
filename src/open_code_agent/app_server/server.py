@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import hashlib
 import json
+import sqlite3
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, cast
@@ -63,6 +64,8 @@ from open_code_agent.app_server.transport import AsyncLineTransport, TransportEr
 from open_code_agent.execution import CommandExecutionPolicy
 from open_code_agent.mcp import MCPServerConfig, ManagedMCPServer
 from open_code_agent.persistence import ProfileNotFoundError, ProviderProfileStore
+from open_code_agent.persistence.tasks import TaskStore
+from open_code_agent.protocol import AgentMessage, MessageRole, TextContent
 from open_code_agent.providers import (
     EnvironmentSecretResolver,
     ManagedModelProvider,
@@ -96,6 +99,7 @@ _STATEFUL_METHODS = frozenset(
         "session/list",
         "turn/start",
         "turn/cancel",
+        "task/create", "task/list", "task/get", "task/rename", "task/delete", "task/clear", "task/resume", "task/checkpoint/preview", "task/checkpoint/restore",
         "shutdown",
     }
 )
@@ -145,7 +149,9 @@ class AppServer:
         self._exited = False
         self._run_slots = asyncio.Semaphore(self._limits.max_concurrent_runs)
         self._pending: dict[str, asyncio.Future[dict[str, Any] | None]] = {}
+        self._request_tasks: set[asyncio.Task[None]] = set()
         self._request_counter = 0
+        self._tasks: TaskStore | None = None
 
     async def serve(self) -> None:
         """Handle one connection until exit notification or EOF, then clean up."""
@@ -173,7 +179,12 @@ class AppServer:
                 if isinstance(incoming, Notification):
                     await self._handle_notification(incoming)
                     continue
-                await self._handle_request(incoming)
+                # A request can issue a server-to-client request (for example,
+                # resolving a VS Code-stored API key).  Keep reading while its
+                # handler awaits that response, otherwise the protocol deadlocks.
+                task = asyncio.create_task(self._handle_request(incoming))
+                self._request_tasks.add(task)
+                task.add_done_callback(self._request_tasks.discard)
         finally:
             self._exited = True
             await self._cleanup()
@@ -222,6 +233,15 @@ class AppServer:
             "session/list": self._session_list,
             "turn/start": self._turn_start,
             "turn/cancel": self._turn_cancel,
+            "task/create": self._task_create,
+            "task/list": self._task_list,
+            "task/get": self._task_get,
+            "task/rename": self._task_rename,
+            "task/delete": self._task_delete,
+            "task/clear": self._task_clear,
+            "task/resume": self._task_resume,
+            "task/checkpoint/restore": self._task_checkpoint_restore,
+            "task/checkpoint/preview": self._task_checkpoint_preview,
             "shutdown": self._shutdown,
         }
         try:
@@ -249,6 +269,16 @@ class AppServer:
             raise AppServerError(
                 INCOMPATIBLE_PROTOCOL, "No mutually supported protocol version."
             )
+        data_directory = params.get("data_directory")
+        if data_directory is not None and (not isinstance(data_directory, str) or not data_directory):
+            raise AppServerError(INVALID_PARAMS, "data_directory is invalid.")
+        # A desktop client supplies its global storage directory. CLI callers keep
+        # the existing application data location by omitting it.
+        from open_code_agent.config import Settings
+        try:
+            self._tasks = TaskStore(Path(data_directory) if data_directory else Settings().data_dir)
+        except (OSError, sqlite3.Error) as error:
+            raise AppServerError(INTERNAL_ERROR, "Task history storage could not be opened.") from error
         self._initialized = True
         return {
             "server_name": SERVER_NAME,
@@ -260,7 +290,8 @@ class AppServer:
                 "streaming_events": True,
                 "bidirectional_approvals": True,
                 "cancellation": True,
-                "conversation_persistence": False,
+                "conversation_persistence": True,
+                "task_history": True,
                 "mcp": True,
                 "pty": False,
             },
@@ -500,6 +531,17 @@ class AppServer:
         except ValidationError as error:
             raise AppServerError(INVALID_PARAMS, "agent_limits are invalid.") from error
         context: dict[str, str] = {}
+        record_holder: dict[str, SessionRecord] = {}
+
+        class TaskCheckpointRecorder:
+            def record(self, proposal: Any) -> None:
+                current = record_holder.get("record")
+                if current is not None and current.task_id is not None:
+                    self_outer._task_store().record_patch_checkpoint(
+                        current.task_id, workspace.root, proposal
+                    )
+
+        self_outer = self
         approvals = RpcApprovalHandler(
             self._approval_request, lambda: (context["session_id"], context["run_id"])
         )
@@ -514,6 +556,7 @@ class AppServer:
                 command_policy=CommandExecutionPolicy(execution_enabled=True),
                 command_approvals=approvals,
                 patch_approvals=approvals,
+                patch_checkpoint_recorder=TaskCheckpointRecorder(),
                 secret_resolver=self._secret_resolver,
                 mcp_servers=mcp_servers,
             )
@@ -527,7 +570,110 @@ class AppServer:
             raise AppServerError(INVALID_PARAMS, "MCP server could not be connected.") from error
         # The closure is per-session and only one run can be active for it.
         record.approval_context = context
+        task_id = params.get("task_id")
+        if task_id is not None:
+            if not isinstance(task_id, str):
+                raise AppServerError(INVALID_PARAMS, "task_id is invalid.")
+            try:
+                task = self._task_store().get(task_id, workspace.root)
+            except KeyError as error:
+                await record.session.aclose()
+                await self._sessions.remove(record.session_id)
+                raise AppServerError(SESSION_NOT_FOUND, "Task was not found in this workspace.") from error
+            record.task_id = task_id
+            record.history = self._history_from_entries(cast(list[dict[str, Any]], task["entries"]))
+        else:
+            created = self._task_store().create(workspace.root, title="New task", profile_id=profile.profile_id, model=model, mode=mode.value)
+            record.task_id = cast(str, created["task_id"])
+        record_holder["record"] = record
         return self._session_summary(record, detail=True)
+
+    def _task_store(self) -> TaskStore:
+        if self._tasks is None:
+            raise AppServerError(INTERNAL_ERROR, "Task storage is unavailable.")
+        return self._tasks
+
+    def _task_workspace(self, params: dict[str, Any]) -> WorkspaceContext:
+        value = params.get("workspace_path")
+        if not isinstance(value, str) or not value:
+            raise AppServerError(INVALID_PARAMS, "workspace_path is required.")
+        try: return WorkspaceContext(root=Path(value))
+        except (InvalidWorkspaceError, OSError, ValueError) as error:
+            raise AppServerError(INVALID_WORKSPACE, "Workspace is invalid.") from error
+
+    async def _task_create(self, params: dict[str, Any]) -> dict[str, Any]:
+        workspace = self._task_workspace(params)
+        title = params.get("title", "New task")
+        mode = params.get("mode", "ask")
+        if not isinstance(title, str) or not isinstance(mode, str): raise AppServerError(INVALID_PARAMS, "Task parameters are invalid.")
+        try: return self._task_store().create(workspace.root, title=title, profile_id=params.get("profile_id") if isinstance(params.get("profile_id"), str) else None, model=params.get("model") if isinstance(params.get("model"), str) else None, mode=mode)
+        except (ValueError, OSError) as error: raise AppServerError(INVALID_PARAMS, "Task could not be created.") from error
+
+    async def _task_list(self, params: dict[str, Any]) -> dict[str, Any]:
+        workspace = self._task_workspace(params); query = params.get("query", "")
+        if not isinstance(query, str): raise AppServerError(INVALID_PARAMS, "query is invalid.")
+        return {"tasks": self._task_store().list(workspace.root, query)}
+
+    async def _task_get(self, params: dict[str, Any]) -> dict[str, Any]:
+        workspace = self._task_workspace(params); task_id = params.get("task_id")
+        if not isinstance(task_id, str): raise AppServerError(INVALID_PARAMS, "task_id is required.")
+        try: return self._task_store().get(task_id, workspace.root)
+        except KeyError as error: raise AppServerError(SESSION_NOT_FOUND, "Task was not found in this workspace.") from error
+
+    async def _task_rename(self, params: dict[str, Any]) -> dict[str, Any]:
+        workspace = self._task_workspace(params); task_id, title = params.get("task_id"), params.get("title")
+        if not isinstance(task_id, str) or not isinstance(title, str): raise AppServerError(INVALID_PARAMS, "Task parameters are invalid.")
+        try: self._task_store().rename(task_id, workspace.root, title); return {"task_id": task_id}
+        except (KeyError, ValueError) as error: raise AppServerError(INVALID_PARAMS, "Task could not be renamed.") from error
+
+    async def _task_delete(self, params: dict[str, Any]) -> dict[str, Any]:
+        workspace = self._task_workspace(params); task_id = params.get("task_id")
+        if not isinstance(task_id, str): raise AppServerError(INVALID_PARAMS, "task_id is required.")
+        try: self._task_store().delete(task_id, workspace.root); return {"task_id": task_id, "deleted": True}
+        except KeyError as error: raise AppServerError(SESSION_NOT_FOUND, "Task was not found in this workspace.") from error
+
+    async def _task_clear(self, params: dict[str, Any]) -> dict[str, Any]:
+        workspace = self._task_workspace(params); return {"deleted": self._task_store().clear(workspace.root)}
+
+    async def _task_resume(self, params: dict[str, Any]) -> dict[str, Any]:
+        # Resume validates that the saved provider still exists, then delegates
+        # to normal session construction; no prior tools are replayed.
+        task = await self._task_get(params)
+        profile_id = task.get("profile_id")
+        if not isinstance(profile_id, str) or not profile_id:
+            raise AppServerError(PROFILE_NOT_FOUND, "This task requires provider selection before resuming.")
+        create = {"workspace_path": params["workspace_path"], "task_id": task["task_id"], "profile_id": profile_id, "model": task.get("model"), "mode": task.get("mode", "ask")}
+        return await self._session_create(create)
+
+    async def _task_checkpoint_restore(self, params: dict[str, Any]) -> dict[str, Any]:
+        workspace = self._task_workspace(params)
+        task_id, checkpoint_id = params.get("task_id"), params.get("checkpoint_id")
+        if not isinstance(task_id, str) or not isinstance(checkpoint_id, str):
+            raise AppServerError(INVALID_PARAMS, "Checkpoint parameters are invalid.")
+        try:
+            return self._task_store().restore_checkpoint(
+                task_id, workspace.root, checkpoint_id
+            )
+        except KeyError as error:
+            raise AppServerError(SESSION_NOT_FOUND, "Checkpoint was not found.") from error
+
+    async def _task_checkpoint_preview(self, params: dict[str, Any]) -> dict[str, Any]:
+        workspace = self._task_workspace(params)
+        task_id, checkpoint_id = params.get("task_id"), params.get("checkpoint_id")
+        if not isinstance(task_id, str) or not isinstance(checkpoint_id, str):
+            raise AppServerError(INVALID_PARAMS, "Checkpoint parameters are invalid.")
+        try:
+            return {"files": self._task_store().restore_preview(task_id, workspace.root, checkpoint_id)}
+        except KeyError as error:
+            raise AppServerError(SESSION_NOT_FOUND, "Checkpoint was not found.") from error
+
+    def _history_from_entries(self, entries: list[dict[str, Any]]) -> list[AgentMessage]:
+        result: list[AgentMessage] = []
+        for entry in entries:
+            kind, text = entry.get("kind"), entry.get("text")
+            if kind in {"user", "assistant"} and isinstance(text, str) and text:
+                result.append(AgentMessage(role=MessageRole(kind), content=[TextContent(text=text)]))
+        return result
 
     def _workspace_policy(self, params: dict[str, Any]) -> WorkspacePolicy:
         overrides = params.get("workspace_policy")
@@ -565,6 +711,7 @@ class AppServer:
         session = record.session
         data: dict[str, Any] = {
             "session_id": record.session_id,
+            "task_id": record.task_id,
             "mode": session.mode.value,
             "model": session.model,
             "profile": safe_profile(session.profile),
@@ -636,6 +783,8 @@ class AppServer:
             self._run_turn(record, run_id, text), name=f"oca-run-{run_id}"
         )
         record.active = ActiveRun(run_id, task)
+        if record.task_id:
+            self._task_store().entry(record.task_id, record.session.workspace.root, entry_id=f"{run_id}:user", kind="user", text=text)
         record.updated_at = now()
         return {"run_id": run_id, "accepted": True}
 
@@ -688,10 +837,19 @@ class AppServer:
                             for message in event.result.messages
                         ]
                         record.turn_count += 1
+                        if record.task_id:
+                            assistant = next((message for message in reversed(record.history) if message.role is MessageRole.ASSISTANT), None)
+                            if assistant is not None:
+                                response = "".join(part.text for part in assistant.content if isinstance(part, TextContent))
+                                if response:
+                                    self._task_store().entry(record.task_id, record.session.workspace.root, entry_id=f"{run_id}:assistant", kind="assistant", text=response)
+                            self._task_store().state(record.task_id, record.session.workspace.root, "completed", event.result.usage.model_dump(mode="json"))
         except asyncio.CancelledError:
             if not terminal_sent:
                 with contextlib.suppress(TransportError):
                     await self._run_event(record, run_id, "run_cancelled", {})
+            if record.task_id:
+                self._task_store().state(record.task_id, record.session.workspace.root, "cancelled")
             raise
         except Exception:
             if not terminal_sent:
@@ -699,6 +857,8 @@ class AppServer:
                     await self._run_event(
                         record, run_id, "run_failed", {"message": "Agent run failed."}
                     )
+            if record.task_id:
+                self._task_store().state(record.task_id, record.session.workspace.root, "failed")
         finally:
             if record.active is not None and record.active.run_id == run_id:
                 record.active = None
@@ -855,6 +1015,15 @@ class AppServer:
 
     async def _cleanup(self) -> None:
         self._shutting_down = True
+        current = asyncio.current_task()
+        request_tasks = [
+            task for task in self._request_tasks if task is not current
+        ]
+        for task in request_tasks:
+            task.cancel()
+        if request_tasks:
+            await asyncio.gather(*request_tasks, return_exceptions=True)
+        self._request_tasks.clear()
         for future in self._pending.values():
             if not future.done():
                 future.set_result(None)
@@ -864,6 +1033,9 @@ class AppServer:
                 await self._sessions.close_all()
         except TimeoutError:
             pass
+        if self._tasks is not None:
+            self._tasks.close()
+            self._tasks = None
 
     async def _send_error(
         self, identifier: str | int | None, code: int, message: str

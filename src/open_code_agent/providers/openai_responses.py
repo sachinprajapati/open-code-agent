@@ -419,16 +419,17 @@ class OpenAIResponsesProvider:
 
     async def _stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
         self._ensure_open()
-        headers = await self._headers("text/event-stream")
-        mapper, parser = (
-            _ResponsesStreamMapper(),
-            SSEEventParser(self._max_sse_event_size),
-        )
         try:
+            headers = await self._headers("text/event-stream")
+            payload = map_responses_request(request)
+            mapper, parser = (
+                _ResponsesStreamMapper(),
+                SSEEventParser(self._max_sse_event_size),
+            )
             async with self._client.stream(
                 "POST",
                 self._profile.endpoint("responses"),
-                json=map_responses_request(request),
+                json=payload,
                 headers=headers,
             ) as response:
                 if not response.is_success:
@@ -462,6 +463,18 @@ class OpenAIResponsesProvider:
             yield StreamError(
                 error=self._local_error(
                     ModelErrorCategory.PROVIDER_ERROR, str(error), False
+                )
+            )
+        except SecretResolutionError as error:
+            yield StreamError(
+                error=self._local_error(
+                    ModelErrorCategory.AUTHENTICATION, str(error), False
+                )
+            )
+        except OpenAICompatibleMappingError as error:
+            yield StreamError(
+                error=self._local_error(
+                    ModelErrorCategory.INVALID_REQUEST, str(error), False
                 )
             )
 

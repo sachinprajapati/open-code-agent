@@ -114,11 +114,11 @@ class OpenAICompatibleProvider:
 
     async def _stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
         self._ensure_open()
-        payload = map_chat_completions_request(request)
-        headers = await self._headers(accept="text/event-stream")
-        mapper = OpenAICompatibleStreamMapper(self.provider_id)
-        parser = SSEEventParser(self._max_sse_event_size)
         try:
+            payload = map_chat_completions_request(request)
+            headers = await self._headers(accept="text/event-stream")
+            mapper = OpenAICompatibleStreamMapper(self.provider_id)
+            parser = SSEEventParser(self._max_sse_event_size)
             async with self._client.stream(
                 "POST",
                 self._profile.endpoint("chat/completions"),
@@ -173,6 +173,18 @@ class OpenAICompatibleProvider:
             yield StreamError(
                 error=self._local_error(
                     ModelErrorCategory.PROVIDER_ERROR, str(error), False
+                )
+            )
+        except SecretResolutionError as error:
+            yield StreamError(
+                error=self._local_error(
+                    ModelErrorCategory.AUTHENTICATION, str(error), False
+                )
+            )
+        except OpenAICompatibleMappingError as error:
+            yield StreamError(
+                error=self._local_error(
+                    ModelErrorCategory.INVALID_REQUEST, str(error), False
                 )
             )
 

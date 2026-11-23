@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Awaitable, Callable
+from typing import cast
 
 from open_code_agent.execution import ApprovalDecision, CommandApprovalRequest
-from open_code_agent.protocol.common import JSONObject
+from open_code_agent.protocol.common import JSONObject, JSONValue
 from open_code_agent.tools import PatchApprovalRequest
 
 
@@ -76,6 +77,7 @@ class RpcApprovalHandler:
                 "proposal": {
                     "proposal_id": proposal.proposal_id,
                     "affected_paths": list(proposal.affected_paths),
+                    "changes": cast(JSONValue, list(proposal.diff_metadata)),
                     "diff": proposal.diff,
                 },
             }

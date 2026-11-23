@@ -6,7 +6,9 @@ import pytest
 from open_code_agent.protocol import (
     AgentMessage,
     MessageRole,
+    ModelErrorCategory,
     ModelRequest,
+    StreamError,
     TextContent,
     ToolDefinition,
 )
@@ -114,3 +116,28 @@ async def test_responses_provider_streams_function_calls() -> None:
     completed = next(event for event in events if event.type == "tool_call_completed")
     assert completed.tool_call.arguments == {"path": "."}
     assert events[-1].type == "stream_completed"
+
+
+@pytest.mark.asyncio
+async def test_responses_provider_reports_unavailable_secret_as_model_error() -> None:
+    provider = OpenAIResponsesProvider(
+        profile(),
+        secret_resolver=MappingSecretResolver({}),
+        transport=httpx.MockTransport(lambda _: httpx.Response(200)),
+    )
+    request = ModelRequest(
+        model="gpt-6-luna",
+        messages=[
+            AgentMessage(role=MessageRole.USER, content=[TextContent(text="inspect")])
+        ],
+    )
+
+    events = [event async for event in provider.stream(request)]
+    await provider.aclose()
+
+    assert len(events) == 1
+    assert isinstance(events[0], StreamError)
+    assert events[0].error.category is ModelErrorCategory.AUTHENTICATION
+    assert events[0].error.message == (
+        "Secret reference 'env:OPENAI_API_KEY' is unavailable."
+    )
